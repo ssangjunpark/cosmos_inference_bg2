@@ -155,6 +155,62 @@ class GatewayTests(unittest.TestCase):
         self.service.policy.block.set();self.finish()
         self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
 
+    def test_connection_refused_forwards_nothing_and_recovers_with_a_new_observation(self):
+        import socket
+        original=self.gateway.client
+        with socket.socket() as unavailable:
+            unavailable.bind(('127.0.0.1',0))  # Reserve a local port without a listening service.
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{unavailable.getsockname()[1]}',TOKEN,timeout=.1)
+            self.gateway.step(MONO);self.finish()
+        self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
+        self.assertFalse(self.gateway.planner.in_flight)
+        self.gateway.client=original
+        self.gateway.send_chunk=self.sent.append
+        later=130_000_000
+        self.observations.add_joints(sample(self.p,ROBOT+later,MONO+later))
+        for key in self.p['cameras']:self.observations.add_camera(key,ROBOT+later,MONO+later,image(key))
+        self.cache.update(status(self.startup.epoch,ROBOT+later),MONO+later)
+        self.gateway.step(MONO+later);self.finish(MONO+later+10_000_000)
+        self.assertEqual(self.gateway.forwarded,1)
+        self.assertEqual(self.sent[0]['source_time_ns'],ROBOT+later)
+        self.assertEqual(self.gateway.requests,2)
+
+    def test_dropped_tcp_connection_does_not_forward_or_leave_request_inflight(self):
+        import socket
+        import socketserver
+        class Drop(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.recv(4096)
+                self.request.shutdown(socket.SHUT_RDWR)
+        server=socketserver.TCPServer(('127.0.0.1',0),Drop)
+        thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
+        try:
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',TOKEN,timeout=.2)
+            self.gateway.step(MONO);self.finish()
+            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
+            self.assertFalse(self.gateway.planner.in_flight)
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
+
+    def test_unresponsive_http_service_times_out_without_forwarding(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        release=threading.Event();entered=threading.Event()
+        class Hang(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                entered.set();release.wait(2)
+            def log_message(self,*_):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Hang)
+        thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
+        try:
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',TOKEN,timeout=.1)
+            self.gateway.step(MONO);self.finish()
+            self.assertTrue(entered.is_set())
+            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
+            self.assertFalse(self.gateway.planner.in_flight)
+        finally:
+            release.set();server.shutdown();server.server_close();thread.join(2)
+
     def test_no_request_queue_or_repeated_observation(self):
         self.service.policy.block=threading.Event();self.gateway.step(MONO)
         for _ in range(10):self.gateway.step(MONO+1)

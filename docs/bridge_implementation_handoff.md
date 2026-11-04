@@ -35,7 +35,7 @@ transport are legacy co-located drafts. They are not the deployment path for thi
 
 ## Validation evidence
 
-- 82 CPU tests: 81 pass and the optional SDK test skips in the default host environment.
+- 87 CPU tests: 86 pass and the optional SDK test skips in the default host environment.
   The SDK test passes separately in the isolated gateway environment.
 - Real SDK pub/sub passed on loopback with bundled schemas and runtime downloads forbidden,
   also inside the built read-only, network-disabled Python 3.12 gateway container.
@@ -46,6 +46,9 @@ transport are legacy co-located drafts. They are not the deployment path for thi
 - Actual Edge reply passes the FFW trajectory validator at worst observed local latency
   with nine future points. Nano includes a -0.0081 rad gripper value and is correctly
   rejected against reference limits. No model-output clipping or silent coordinate change.
+- Added actual loopback TCP refusal/drop and HTTP timeout tests, fresh-observation recovery,
+  and mocked ROS-node feedback/controller-health loss checks. Physical SSH/LAN disconnects
+  and actuator stopping remain unverified; see the runbook failure-case matrix.
 - Synthetic three-camera/joint observations traverse the actual HTTP service, asynchronous
   gateway, and FFW chunk executor. Negative cases cover clocks, expiry, old epochs,
   homing, ownership, stale feedback/status, model concurrency, and authentication.

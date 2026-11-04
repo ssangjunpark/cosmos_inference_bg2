@@ -1,0 +1,127 @@
+digraph cosmos_bg2 {
+  graph [rankdir=LR, bgcolor="#F7F9FC", pad="0.45", nodesep="0.4", ranksep="0.7", splines=line,
+    fontname="DejaVu Sans", fontsize=23, fontcolor="#14243A", labelloc=t,
+    label="COSMOS BG2  |  Scripts, machines and communication\nSoftware tested locally; physical deployment and SSH/LAN commissioning remain pending.\n"];
+  node [shape=plain, fontname="DejaVu Sans", fontsize=14, fontcolor="#14243A"];
+  edge [fontname="DejaVu Sans", fontsize=12, fontcolor="#334155", penwidth=1.8, arrowsize=0.8];
+
+  ffw [label=<
+    <TABLE BORDER="1" COLOR="#9BD6C4" CELLBORDER="0" CELLSPACING="0" CELLPADDING="16" BGCOLOR="#EBF7F2">
+      <TR><TD WIDTH="425" HEIGHT="100" BGCOLOR="#08765E"><FONT COLOR="white" POINT-SIZE="22"><B>FFW</B></FONT><BR/><FONT COLOR="white">Robot computer</FONT></TD></TR>
+      <TR><TD PORT="obs" HEIGHT="170" ALIGN="LEFT" BGCOLOR="white">
+        <B>Existing ROBOTIS sensor nodes</B><BR/><BR ALIGN="LEFT"/>
+        3 compressed camera streams<BR ALIGN="LEFT"/>
+        /joint_states: positions + velocities<BR ALIGN="LEFT"/>
+        Homing action status<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Joint feedback + homing status go below<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD HEIGHT="80" ALIGN="LEFT"><B>Existing Zenoh router: TCP 7447</B><BR ALIGN="LEFT"/>5090 connects to 192.168.0.14:7447<BR ALIGN="LEFT"/>Local ROS nodes use 127.0.0.1:7447<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD PORT="chunk" HEIGHT="230" ALIGN="LEFT" BGCOLOR="white">
+        <B>cosmos_ffw/node.py</B><BR/><BR ALIGN="LEFT"/>
+        core.py: homing, settling, captured holds<BR ALIGN="LEFT"/>
+        chunks.py: validate / replace / expire<BR ALIGN="LEFT"/>
+        ros_messages.py: build JointTrajectory<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Check session, age, bounds, velocity,<BR ALIGN="LEFT"/>
+        feedback and controller ownership<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Left arm, head, elevator: fixed home holds<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Companion status</B><BR ALIGN="LEFT"/>Session ID, readiness, remaining horizon<BR ALIGN="LEFT"/>Accept stop on /cosmos/bg2/control<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
+        <B>Existing ROBOTIS controllers</B><BR/><BR ALIGN="LEFT"/>
+        Companion submits JointTrajectory<BR ALIGN="LEFT"/>
+        Execute mode only; preview publishes none<BR ALIGN="LEFT"/>
+        100 Hz interpolation + existing motor drivers<BR ALIGN="LEFT"/>
+      </TD></TR>
+    </TABLE>
+  >];
+
+  gateway [label=<
+    <TABLE BORDER="1" COLOR="#A7C6F2" CELLBORDER="0" CELLSPACING="0" CELLPADDING="16" BGCOLOR="#EDF4FF">
+      <TR><TD WIDTH="425" HEIGHT="100" BGCOLOR="#215DB0"><FONT COLOR="white" POINT-SIZE="22"><B>5090</B></FONT><BR/><FONT COLOR="white">Communication PC</FONT></TD></TR>
+      <TR><TD PORT="obs" HEIGHT="170" ALIGN="LEFT" BGCOLOR="white">
+        <B>scripts/gateway.py</B><BR/><BR ALIGN="LEFT"/>
+        observations.py<BR ALIGN="LEFT"/>
+        Align cameras + measured joints<BR ALIGN="LEFT"/>
+        Apply verified crop, rotation and resize<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        rpc.py sends prepared observations<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD PORT="reply" HEIGHT="80" ALIGN="LEFT"><B>rpc.py receives the prediction</B><BR ALIGN="LEFT"/>Check shape, IDs and original timestamp<BR ALIGN="LEFT"/>16 future steps x 8 right-arm/gripper joints<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD PORT="chunk" HEIGHT="230" ALIGN="LEFT" BGCOLOR="white">
+        <B>bg2_bridge/gateway.py</B><BR/><BR ALIGN="LEFT"/>
+        Forward the whole JSON chunk to FFW<BR ALIGN="LEFT"/>
+        Discard stale / old-session results<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        <B>chunks.py / RequestPlanner</B><BR ALIGN="LEFT"/>
+        One inference request in flight<BR ALIGN="LEFT"/>
+        Request newest observations before expiry<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        CPU process; no motor-command publishers<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Use fresh FFW status</B><BR ALIGN="LEFT"/>Matching preview/execute mode + session<BR ALIGN="LEFT"/>Explicit stop goes back to FFW<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
+        <B>SSH tunnel runs on this PC</B><BR/><BR ALIGN="LEFT"/>
+        Local endpoint: 127.0.0.1:8008<BR ALIGN="LEFT"/>
+        SSH destination: PRO 6000<BR ALIGN="LEFT"/>
+        SSH port: configured value (usually 22)<BR ALIGN="LEFT"/>
+      </TD></TR>
+    </TABLE>
+  >];
+
+  pro [label=<
+    <TABLE BORDER="1" COLOR="#CEB7EC" CELLBORDER="0" CELLSPACING="0" CELLPADDING="16" BGCOLOR="#F5EFFB">
+      <TR><TD WIDTH="425" HEIGHT="100" BGCOLOR="#7544AD"><FONT COLOR="white" POINT-SIZE="22"><B>PRO 6000</B></FONT><BR/><FONT COLOR="white">Inference GPU server</FONT></TD></TR>
+      <TR><TD PORT="obs" HEIGHT="170" ALIGN="LEFT" BGCOLOR="white">
+        <B>scripts/cosmos3.py serve</B><BR ALIGN="LEFT"/>
+        Launch model container, then run:<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        <B>scripts/inference_server.py</B><BR ALIGN="LEFT"/>
+        GET /health and POST /predict<BR ALIGN="LEFT"/>
+        Host endpoint: 127.0.0.1:8008 only<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD PORT="reply" HEIGHT="80" ALIGN="LEFT"><B>Return JSON on the HTTP connection</B><BR ALIGN="LEFT"/>Absolute joint positions in radians<BR ALIGN="LEFT"/>Preserve timestamp + session/request IDs<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD HEIGHT="230" ALIGN="LEFT" BGCOLOR="white">
+        <B>scripts/policy_runtime.py</B><BR/><BR ALIGN="LEFT"/>
+        inference_server calls NativePolicy.predict<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        bg2_inference.py: prepare inputs / decode<BR ALIGN="LEFT"/>
+        Cosmos Framework + Edge or Nano weights<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Load once; warm before listening<BR ALIGN="LEFT"/>
+        Keep model on the selected GPU<BR ALIGN="LEFT"/>
+      </TD></TR>
+      <TR><TD HEIGHT="95" ALIGN="LEFT"><B>HTTP authentication</B><BR ALIGN="LEFT"/>Bearer token from a private file<BR ALIGN="LEFT"/>SSH encrypts the cross-machine connection<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
+        <B>Timing contract</B><BR/><BR ALIGN="LEFT"/>
+        16 waypoints x 50 ms = 0.8 s horizon<BR ALIGN="LEFT"/>
+        Horizon starts at the robot observation<BR ALIGN="LEFT"/>
+        Expired predictions are never retimed<BR ALIGN="LEFT"/>
+      </TD></TR>
+    </TABLE>
+  >];
+
+  zenoh [label=<
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="10">
+      <TR><TD WIDTH="235" HEIGHT="100"><B>ZENOH / TCP 7447</B></TD></TR>
+      <TR><TD PORT="obs" HEIGHT="170">CAMERAS + JOINTS<BR/>Compressed RGB<BR/>Named positions + velocities</TD></TR>
+      <TR><TD HEIGHT="80"></TD></TR>
+      <TR><TD PORT="chunk" HEIGHT="230">WHOLE ACTION CHUNK<BR/>/cosmos/bg2/chunk<BR/>Timestamped JSON</TD></TR>
+      <TR><TD PORT="status" HEIGHT="95">READINESS + HORIZON<BR/>/cosmos/bg2/status</TD></TR>
+      <TR><TD HEIGHT="145">Stop travels back on<BR/>/cosmos/bg2/control<BR/><BR/>ROS domain: 30<BR/>(identifier, not a port)</TD></TR>
+    </TABLE>
+  >];
+  ssh [label=<
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="10">
+      <TR><TD WIDTH="275" HEIGHT="100"><B>HTTP THROUGH SSH</B><BR/>Local endpoint: port 8008</TD></TR>
+      <TR><TD PORT="obs" HEIGHT="170">OBSERVATION REQUEST<BR/>3 RGB views + 8 current joints<BR/>instruction + robot timestamp<BR/>NPZ / POST /predict</TD></TR>
+      <TR><TD PORT="reply" HEIGHT="80">PREDICTION RESPONSE<BR/>16 x 8 positions + IDs<BR/>JSON / HTTP response</TD></TR>
+      <TR><TD HEIGHT="230"></TD></TR>
+      <TR><TD HEIGHT="95"></TD></TR>
+      <TR><TD HEIGHT="145">SSH uses its configured port<BR/>(usually 22; not yet confirmed)<BR/>PRO 6000 SSH alias still needed</TD></TR>
+    </TABLE>
+  >];
+  ffw:obs:e -> zenoh:obs:w [color="#08765E", arrowhead=none];
+  zenoh:obs:e -> gateway:obs:w [color="#08765E"];
+  gateway:obs:e -> ssh:obs:w [color="#215DB0", arrowhead=none];
+  ssh:obs:e -> pro:obs:w [color="#215DB0"];
+  pro:reply:w -> ssh:reply:e [color="#7544AD", arrowhead=none, constraint=false];
+  ssh:reply:w -> gateway:reply:e [color="#7544AD", constraint=false];
+  gateway:chunk:w -> zenoh:chunk:e [color="#215DB0", arrowhead=none, constraint=false];
+  zenoh:chunk:w -> ffw:chunk:e [color="#215DB0", constraint=false];
+  ffw:status:e -> zenoh:status:w [color="#08765E", style=dashed, arrowhead=none, constraint=false];
+  zenoh:status:e -> gateway:status:w [color="#08765E", style=dashed, constraint=false];
+}

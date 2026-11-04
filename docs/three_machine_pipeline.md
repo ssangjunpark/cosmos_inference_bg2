@@ -4,6 +4,19 @@ Updated 2026-11-04. All software below is implemented and tested locally on PRO 
 Nothing has been copied to, installed on, restarted, or commanded on 3sp5090 or FFW.
 The reference hardware profile deliberately remains non-executable.
 
+Rendered diagram: [PNG](diagrams/three_machine_pipeline.png),
+[SVG for zooming/printing](diagrams/three_machine_pipeline.svg),
+[editable Graphviz source](diagrams/three_machine_pipeline.dot).
+
+![Scripts, machines, payloads and ports](diagrams/three_machine_pipeline.png)
+
+Regenerate the images with the local Graphviz `dot` command:
+
+```bash
+dot -Tsvg docs/diagrams/three_machine_pipeline.dot -o docs/diagrams/three_machine_pipeline.svg
+dot -Tpng -Gdpi=110 docs/diagrams/three_machine_pipeline.dot -o docs/diagrams/three_machine_pipeline.png
+```
+
 ```mermaid
 flowchart LR
   F["FFW: cameras + joint feedback"] --> G["5090: align observations"]
@@ -156,6 +169,31 @@ limits, homing, holds, ownership loss, authentication, one model thread, and por
 bundles. The unchanged SDK also passes actual local Zenoh pub/sub with bundled schemas, including
 inside the built Python-only gateway image with a read-only filesystem and network disabled;
 this is a loopback check, not validation against the robot's router.
+
+## Failure-case coverage
+
+87 CPU checks run: 86 pass; the optional SDK check skips in the host environment and
+passes separately in the isolated SDK environment. Local connection-failure tests use
+real loopback sockets and the HTTP client, with a fake model; they do not interrupt an
+actual SSH tunnel or connect to either remote machine. Log: `.runtime/logs/pipeline-failure-tests.log`.
+
+| Failure | Tested behavior | Test boundary |
+| --- | --- | --- |
+| Inference connection refused | No chunk forwarded; request state clears; a later fresh observation succeeds after backoff. | Actual local TCP refusal and HTTP recovery. |
+| TCP connection closes during a request | No chunk forwarded; no request remains stuck in flight. | Actual local socket shutdown. |
+| HTTP service accepts input but does not reply | Client times out; no chunk forwarded; request state clears. | Actual local HTTP endpoint with an intentionally withheld response. |
+| FFW status disappears or session changes during inference | Completed reply is discarded; stale/mismatched status cannot start new requests. | Simulated monotonic timestamps/session changes through gateway + actual HTTP service. |
+| No replacement chunk arrives | Current forecast expires; generate a measured right hold and preserve passive holds; fresh chunks may resume. | Robot-side executor with synthetic fresh feedback. |
+| Joint feedback or controller health is lost | Fault the session; do not invent a stop position or publish through failed controller gates. | ROS-node boundary mocked; physical stopping is unverified. |
+| Old, duplicate, malformed, out-of-bounds or overly fast predictions | Reject without replacing the last accepted trajectory. | CPU executor and protocol tests. |
+| Stale/misaligned observations, failed homing, competing publisher, clock jumps | Block readiness/requests or fault the session as appropriate. | Synthetic observations, clocks and ROS graph/service responses. |
+
+This is not exhaustive failure coverage. Still untested on the physical setup: SSH/LAN
+cable loss and reconnection, Zenoh router restart, process/container kills, machine power
+loss, real network congestion/jitter, and actual actuator response to holds/stops. If
+FFW feedback or command ownership is unavailable, a software hold cannot be guaranteed;
+the previous finite trajectory may finish and the existing controller may retain its
+last target. The robot's independent stop/watchdog must be checked during commissioning.
 
 ## Information still needed for physical commissioning
 

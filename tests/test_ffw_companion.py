@@ -456,6 +456,22 @@ class NodeWiringTests(unittest.TestCase):
         before=len(node.status_pub.sent);node.shutdown_hold()
         self.assertEqual(len(node.status_pub.sent),before)
 
+    def test_feedback_loss_faults_without_inventing_a_stop_position(self):
+        import time
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        before=node.command_count;node.feedback=None;node.tick()
+        self.assertEqual(node.startup.phase,'fault')
+        self.assertEqual(node.engine.valid_until_ns,0)
+        self.assertEqual(node.command_count,before)
+
+    def test_controller_health_loss_faults_and_cannot_publish_a_hold(self):
+        import time
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        before=node.command_count;node.controller_ok_at=0;node.tick()
+        self.assertEqual(node.startup.phase,'fault')
+        self.assertEqual(node.engine.valid_until_ns,0)
+        self.assertEqual(node.command_count,before)
+
     def test_stale_lease_and_stale_feedback_cannot_submit_a_chunk(self):
         import time
         from types import SimpleNamespace as NS
