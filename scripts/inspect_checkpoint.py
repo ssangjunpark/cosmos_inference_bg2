@@ -19,6 +19,8 @@ def main() -> None:
     from torch.distributed.checkpoint import FileSystemReader
     config = yaml.safe_load((checkpoint / "config.yaml").read_text())
     contract = json.loads((checkpoint / "input_contract.json").read_text())
+    from bg2_inference import verify_adapter
+    adapter = verify_adapter(Path(__file__).resolve().parents[1] / "adapters", contract)
     metadata = FileSystemReader(str(checkpoint / "model")).read_metadata()
     projections = {
         key: list(value.size) for key, value in metadata.state_dict_metadata.items()
@@ -34,7 +36,11 @@ def main() -> None:
         "vision": contract["vision"], "prompt_format": contract["prompt_format"],
         "tokenizer_config": config["model"]["config"]["vlm_config"]["tokenizer"],
         "vae_path": config["model"]["config"]["tokenizer"]["vae_path"],
-        "unresolved": ["custom model implementation", "RobotEscape embodiment slot", "native inference sample/mask schema"],
+        "adapter": {"source_bundle": adapter["source_bundle"], "source_case": adapter["source_case"],
+                    "domain_id": adapter["domain_id"], "action_dim": adapter["action_dim"],
+                    "max_action_dim": adapter["max_action_dim"], "future_steps": adapter["future_steps"],
+                    "condition_frame_indexes_vision": [0], "condition_frame_indexes_action": [0],
+                    "action_start_frame_offset": 0, "source_hashes_verified": True},
     }
     print(json.dumps(result, indent=2))
 

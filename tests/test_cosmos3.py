@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(SCRIPTS.parent / "adapters"))
 import cosmos3
 
 
@@ -154,25 +156,127 @@ class ConfigRelocationTests(unittest.TestCase):
                 self.assertFalse(derived["config"]["ema"]["enabled"])
 
 
-@unittest.skipUnless(importlib.util.find_spec("torch") and importlib.util.find_spec("numpy"), "Optional sample dependencies unavailable")
-class SampleTests(unittest.TestCase):
-    def test_observation_cannot_be_mistaken_for_native_batch(self):
-        import numpy as np
-        from native_infer import load_sample
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "recorded.npz"
-            np.savez(path, head=np.zeros((384, 512, 3), dtype=np.uint8))
-            with self.assertRaisesRegex(ValueError, "missing 'ai_caption'"):
-                load_sample(path)
+DEPENDENCIES = importlib.util.find_spec("torch") and importlib.util.find_spec("numpy")
+BUNDLE = Path(os.environ.get("BG2_TRAINING_BUNDLE", "/home/sangjunpark/Documents/robotescape_training_example_20261104"))
 
-    def test_pickle_input_is_rejected(self):
+
+@unittest.skipUnless(DEPENDENCIES, "Optional sample dependencies unavailable")
+class ObservationTests(unittest.TestCase):
+    def observation(self):
         import numpy as np
-        from native_infer import load_sample
+        from bg2_inference import FORMAT, JOINT_NAMES
+        return dict(head=np.zeros((384, 512, 3), dtype=np.uint8),
+                    wrist_left=np.zeros((256, 256, 3), dtype=np.uint8),
+                    wrist=np.zeros((256, 256, 3), dtype=np.uint8),
+                    joint_position=np.arange(8, dtype=np.float32), source_time_ns=np.asarray(123),
+                    instruction=np.asarray("Pick up the car."), joint_names=np.asarray(JOINT_NAMES),
+                    format=np.asarray(FORMAT))
+
+    def load(self, observation):
+        import numpy as np
+        from bg2_inference import load_observation
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "unsafe.npz"
-            np.savez(path, value=np.array([{}], dtype=object))
-            with self.assertRaises(ValueError):
-                load_sample(path)
+            path = Path(directory) / "observation.npz"
+            np.savez(path, **observation)
+            return load_observation(path)
+
+    def test_current_observation_is_loaded_without_future_labels(self):
+        observation = self.load(self.observation())
+        self.assertEqual(observation["instruction"], "Pick up the car.")
+        self.assertEqual(observation["joint_position"].shape, (8,))
+
+    def test_future_label_field_rejected(self):
+        import numpy as np
+        observation = self.observation()
+        observation["future_actions"] = np.zeros((16, 8))
+        with self.assertRaisesRegex(ValueError, "only.*current-observation"):
+            self.load(observation)
+
+    def test_wrong_joint_order_rejected(self):
+        observation = self.observation()
+        observation["joint_names"] = observation["joint_names"][::-1]
+        with self.assertRaisesRegex(ValueError, "joint order"):
+            self.load(observation)
+
+    def test_bad_pixels_or_nonfinite_state_rejected(self):
+        import numpy as np
+        observation = self.observation()
+        observation["head"] = observation["head"].astype(np.float32)
+        with self.assertRaisesRegex(ValueError, "RGB uint8"):
+            self.load(observation)
+        observation = self.observation()
+        observation["joint_position"][0] = np.nan
+        with self.assertRaisesRegex(ValueError, "finite"):
+            self.load(observation)
+
+    def test_pickle_input_rejected(self):
+        import numpy as np
+        observation = self.observation()
+        observation["instruction"] = np.array({}, dtype=object)
+        with self.assertRaises(ValueError):
+            self.load(observation)
+
+    def test_inverse_affine_selects_future_rows_without_clipping(self):
+        import numpy as np
+        from bg2_cosmos.data import quantile_affine
+        from bg2_inference import decode_actions
+        observation = self.load(self.observation())
+        stats = {"q01": [-2.] * 8, "q99": [2.] * 8}
+        physical = np.tile(np.arange(17, dtype=np.float32)[:, None], (1, 8))
+        physical[0] = observation["joint_position"]
+        normalized = quantile_affine(physical, stats).astype(np.float32)
+        decoded = decode_actions(normalized, observation, {"normalization": {"joint_position": stats}})
+        np.testing.assert_array_equal(decoded, physical[1:])
+        self.assertGreater(float(decoded.max()), 2.)
+
+    def test_decoder_rejects_wrong_shape_and_changed_conditioning(self):
+        import numpy as np
+        from bg2_inference import decode_actions
+        contract = {"normalization": {"joint_position": {"q01": [-1.] * 8, "q99": [1.] * 8}}}
+        observation = self.load(self.observation())
+        for bad in (np.zeros((16, 8)), np.full((17, 8), np.nan), np.zeros((17, 8))):
+            with self.subTest(shape=bad.shape), self.assertRaises(ValueError):
+                decode_actions(bad, observation, contract)
+
+
+@unittest.skipUnless(DEPENDENCIES and (BUNDLE / "data/example/future_joint/manifest.json").is_file(),
+                     "Matching training example bundle unavailable; set BG2_TRAINING_BUNDLE")
+class TrainingReferenceTests(unittest.TestCase):
+    def test_recorded_preparation_matches_actual_training_loader_at_first_middle_and_tail(self):
+        import numpy as np
+        import torch
+        from bg2_cosmos.data import RoomSamples
+        from bg2_inference import decode_actions, load_observation, prepare_tensors, verify_adapter
+        from prepare_observation import prepare
+        torch.set_num_threads(2)
+        root = BUNDLE / "data/example/future_joint"
+        instructions = BUNDLE / "training/cosmos_futurejoint/configs/instructions.json"
+        original = RoomSamples(root, instructions, "train", "canonical")
+        contract = {"normalization": json.loads((BUNDLE / "provenance/data/future_joint/joint_train_stats.json").read_text())}
+        provenance = json.loads((SCRIPTS.parent / "adapters/SOURCE.json").read_text())
+        contract.update(framework_commit=provenance["framework_commit"], data_manifest_sha256=provenance["data_manifest_sha256"],
+                        vision={"first_target_offset_frames": 1, "frame_interval_ns": 50_000_000})
+        verify_adapter(SCRIPTS.parent / "adapters", contract)
+        with tempfile.TemporaryDirectory() as directory:
+            for index in (0, len(original) // 2, len(original) - 1):
+                with self.subTest(index=index):
+                    path = Path(directory) / f"{index}.npz"
+                    prepare(root, "3_0", index, path)
+                    observation = load_observation(path)
+                    prepared = prepare_tensors(observation, contract)
+                    reference = original[index]
+                    torch.testing.assert_close(prepared["video"], reference["video"], rtol=0, atol=0)
+                    torch.testing.assert_close(prepared["action"][0, :8], reference["action"][0], rtol=0, atol=0)
+                    self.assertEqual(int(prepared["domain_id"]), 33)
+                    self.assertEqual(int(prepared["raw_action_dim"]), 8)
+                    self.assertEqual(tuple(prepared["action"].shape), (17, 64))
+                    self.assertEqual(int(torch.count_nonzero(prepared["action"][1:])), 0)
+                    self.assertEqual(int(torch.count_nonzero(prepared["action"][:, 8:])), 0)
+                    normalized = prepared["action"][:, :8].numpy().copy()
+                    valid = reference["valid_future_steps"]
+                    normalized[1:1 + valid] = reference["action"][1:].numpy()
+                    decoded = decode_actions(normalized, observation, contract)
+                    np.testing.assert_allclose(decoded[:valid], reference["absolute_targets"].numpy(), rtol=1e-5, atol=2e-7)
 
 
 if __name__ == "__main__":

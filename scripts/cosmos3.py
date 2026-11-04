@@ -156,18 +156,18 @@ def tokenizer_bind(tokenizer: Path) -> tuple[list[str], str]:
 
 def run(args: argparse.Namespace) -> None:
     checkpoint = published_checkpoint(args.checkpoint_root, args.variant, args.step)
-    sample = args.sample.resolve(strict=True)
+    observation = args.observation.resolve(strict=True)
     tokenizer = args.tokenizer.resolve(strict=True)
     vae = args.vae.resolve(strict=True)
-    if not sample.is_file() or sample.suffix != ".npz":
-        raise ValueError("--sample must be a native sample .npz archive")
+    if not observation.is_file() or observation.suffix != ".npz":
+        raise ValueError("--observation must be a recorded observation .npz archive")
     if not tokenizer.is_dir() or not (tokenizer / "tokenizer_config.json").is_file() or not vae.is_file():
         raise ValueError("Provide a complete local tokenizer directory and the local Wan VAE file")
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     output = ROOT / "outputs" / f"{args.variant}-{args.step:06d}-{run_id}"
     command = container(args.gpu, output, args.dry_run)
     command += bind(checkpoint, "/checkpoint")
-    command += bind(sample, "/input/sample.npz")
+    command += bind(observation, "/input/observation.npz")
     tokenizer_mount, tokenizer_inside = tokenizer_bind(tokenizer)
     command += tokenizer_mount
     command += bind(vae, "/assets/Wan2.2_VAE.pth")
@@ -178,7 +178,7 @@ def run(args: argparse.Namespace) -> None:
         command += bind(adapter, "/adapter")
     command += [
         POLICY_IMAGE, "/app/native_infer.py",
-        "--checkpoint", "/checkpoint", "--sample", "/input/sample.npz",
+        "--checkpoint", "/checkpoint", "--observation", "/input/observation.npz",
         "--tokenizer", tokenizer_inside, "--vae", "/assets/Wan2.2_VAE.pth",
         "--output", "/results", "--seed", str(args.seed),
         "--steps", str(args.steps), "--guidance", str(args.guidance), "--shift", str(args.shift),
@@ -206,15 +206,15 @@ def main() -> int:
     health = commands.add_parser("doctor", help="Verify container CUDA and media dependencies")
     health.add_argument("--gpu", required=True)
     health.add_argument("--dry-run", action="store_true")
-    infer = commands.add_parser("infer", help="Save model outputs for one recorded native sample")
+    infer = commands.add_parser("infer", help="Save model outputs for one recorded observation")
     infer.add_argument("--checkpoint-root", type=Path, default=CHECKPOINT_ROOT)
     infer.add_argument("--variant", choices=("edge", "nano"), required=True)
     infer.add_argument("--step", type=int, default=20000)
     infer.add_argument("--gpu", required=True)
-    infer.add_argument("--sample", type=Path, required=True)
+    infer.add_argument("--observation", type=Path, required=True)
     infer.add_argument("--tokenizer", type=Path, required=True)
     infer.add_argument("--vae", type=Path, required=True)
-    infer.add_argument("--adapter-dir", type=Path)
+    infer.add_argument("--adapter-dir", type=Path, default=ROOT / "adapters")
     infer.add_argument("--seed", type=int, default=0)
     infer.add_argument("--steps", type=int, default=4)
     infer.add_argument("--guidance", type=float, default=3.0)

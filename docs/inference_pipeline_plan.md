@@ -16,23 +16,25 @@ settings produced it. Repeat that validation for Nano. Physical robot commands a
 - A current recorded observation is saved locally; the recorded camera/joint dataset is available.
 - The launcher mounts checkpoints and inputs read-only, runs as the user, disables networking,
   and writes results to a fresh directory.
-- The native runner can load a supplied model class and a prepared native sample. It is still
-  an integration scaffold; raw output tensors are not yet verified physical joint targets.
+- Matching training source is available at `/home/sangjunpark/Documents/robotescape_training_example_20261104`,
+  specifically `training/cosmos_futurejoint`. The required six adapter files are vendored with verified hashes.
+- The runner accepts current recorded observations and builds the source-matched native batch.
+  A decoder saves 16-by-8 absolute joint predictions; a real GPU model run remains pending.
 
 ## Implementation order
 
 | Step | Remaining work | Completion evidence |
 | --- | --- | --- |
 | 1 | Finish the Docker environment and run the runtime check. | Base and policy images build; verified image provenance, CUDA arithmetic, and real video decoding pass inside the container. |
-| 2 | Review and integrate the matching training adapter. | The saved `bg2_cosmos.model.BG2PolicyModel` imports; its inference behavior, custom embodiment ID, and data schema are established from source. |
-| 3 | Construct a native inference sample from recorded observations. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
-| 4 | Implement and verify the output decoder. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
+| 2 | **Source review and integration complete.** Validate its native runtime in Docker. | The saved `bg2_cosmos.model.BG2PolicyModel` imports; its inference behavior, custom embodiment ID, and data schema are established from source. |
+| 3 | **Implemented; CPU reference checks passed.** Verify native tokenization and packing in Docker. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
+| 4 | **Implemented; CPU decoding checks passed.** Verify on generated outputs. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
 | 5 | Run Edge and Nano end to end. | Both 20k checkpoints produce real saved predictions for recorded inputs; input/checkpoint identity and sampling parameters are recorded. |
 | 6 | Measure runtime and add a persistent inference worker. | Separate loading, preprocessing, generation, and decoding timings; record GPU memory; reuse the loaded model between requests. |
 | 7 | Connect the later hardware bridge. | Use verified predictions with the homing/hold coordinator, fresh robot observations, explicit command ownership, and tested trajectory timing. |
 
-Steps 2–4 depend on the matching training adapter. Environment verification and independent
-diagnostics can proceed while that source is being retrieved.
+The matching source has been found and integrated. Steps 2–4 no longer depend on receiving
+training code; the remaining checks require the completed Docker environment and real model outputs.
 
 ## Immediate environment fix
 
@@ -48,19 +50,31 @@ runtime provenance after installing its documented dependency group.
 A corrected build is being retried. Successful builds and GPU runtime verification are
 still required; passing the CPU regression check alone does not establish a working image.
 
-## Information needed from the trainer
+## Matching training source and completed integration
 
-Provide the original `bg2_cosmos/model.py` and `bg2_cosmos/data.py` with any local imports
-they require, or a self-contained inference adapter. The full optimizer and training loop
-are unnecessary.
+Use `/home/sangjunpark/Documents/robotescape_training_example_20261104/training/cosmos_futurejoint`.
+The separate `cosmos_futureee` case and older simulation experiments have different action contracts.
 
-The checkpoint already supplies the framework commit, model architecture settings,
-normalization statistics, camera contract, joint names, and 16-step target horizon.
-It does not identify the active embodiment slot or reproduce the full input/mask schema.
-Do not infer those from the number of action-projector slots or substitute DROID defaults.
+The original training manifest hash and complete normalization statistics match both 20k
+checkpoints. The supplied framework's model, sequence plan, collation, prompt formatter,
+and inference loader files match our pinned upstream checkout byte for byte.
 
-The existing older `/mnt/ssd2/sangjunpark/bg2_cosmos` simulation experiment uses different
-training code and contracts. It is not established as the adapter for these checkpoints.
+The source confirms:
+
+- `BG2PolicyModel` changes training/validation checks only and inherits native inference.
+- Domain 33, eight measured right-arm/gripper channels, padded to 64.
+- Current image and current joint row zero are conditioned; action temporal offset is zero.
+- Sixteen future joint rows at 20 Hz use zero placeholders during inference.
+- Exact original image composition, prompt formatter, and train-only quantile affine, without clipping.
+
+The native generator also requires `ActionProcessingRecord`. The inference adapter supplies
+an identity inverse record for eight channels, preserving normalized native output. The
+local decoder removes the conditioned row and applies the training inverse affine once.
+
+Twenty CPU tests pass, including exact pixel/current-state comparisons against the actual
+training loader at the first, middle, and tail example frames, decoder recovery of recorded
+targets, rejection of future labels, and input/joint-order validation. These checks establish
+input/decoder agreement; GPU tokenization, model loading, and generation still need validation.
 
 ## Validation boundaries
 

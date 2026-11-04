@@ -1,0 +1,45 @@
+{
+  "source_bundle": "robotescape_training_example_20261104",
+  "source_case": "cosmos_futurejoint",
+  "framework_commit": "b98934eda43f4d31972538a527f8663f003c27dc",
+  "data_manifest_sha256": "7df86c690ede7f484303528b25fcf8f7958674bf93bac72df8eab19a8f7e3b51",
+  "normalization_sha256": "ec6a800c9fedcbaff5b71ce15e2f47f42b6ed4d316f7a7bf679f2ecdd5a3d2c5",
+  "model_target": "bg2_cosmos.model.BG2PolicyModel",
+  "domain_id": 33,
+  "action_dim": 8,
+  "max_action_dim": 64,
+  "future_steps": 16,
+  "conditioning_fps": 20,
+  "files": {
+    "bg2_cosmos/__init__.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "bg2_cosmos/model.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/model.py",
+      "sha256": "76bf29352dafc36d86cf4ba128eb1a5bc6a582459e76ea6208c756358795d30e",
+      "bytes": 969
+    },
+    "bg2_cosmos/data.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/data.py",
+      "sha256": "a0b25d81c24bdf56de62c89247f2277a64f00865967fbfec281df38c2663ec4c",
+      "bytes": 7926
+    },
+    "bg2_cosmos/vision_contract.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/vision_contract.py",
+      "sha256": "76fd9d4cfe0b244f1d2985ca920bd655e6b8cd2ed9796809e139cb427cdab911",
+      "bytes": 1362
+    },
+    "bg2_cosmos/instruction_data.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/instruction_data.py",
+      "sha256": "a04526a8710ddcdbe7045447e2192f161ea845ddbc1811d0a653e47536577843",
+      "bytes": 2289
+    },
+    "bg2_cosmos/bg2_data.py": {
+      "source": "training/cosmos_futurejoint/bg2_cosmos/bg2_data.py",
+      "sha256": "c0ecd0dcc28ba8fe9c8e1a013e76c3ceb8516e2e65df39541e8403dd3acb624f",
+      "bytes": 2525
+    }
+  }
+}

@@ -47,13 +47,15 @@ DROID safetensors policies used by the guide's server example. Keep `model/.meta
 and every `model/*.distcp` together, including empty replica shards.
 
 The saved configuration names `bg2_cosmos.model.BG2PolicyModel` and `bg2_cosmos.data.RoomLoader`.
-The full training pipeline is not an inference requirement. The matching custom model adapter
-and exact inference sample preparation are required until their compatibility with the native
-base class has been checked. This runner preserves the saved model target.
+The matching source was supplied in `robotescape_training_example_20261104`, under
+`training/cosmos_futurejoint`. Six small, unchanged adapter files are included in
+[`adapters/`](adapters/README.md), with source hashes. The full training pipeline is unnecessary.
+The saved model class inherits native inference without an inference override.
 
-The recorded contract supplies the camera composition, eight-channel joint order, training
-normalization statistics, and 16-step future target horizon. It does not record the complete
-native sample/mask schema or custom embodiment ID. Do not substitute the public DROID defaults.
+Source verification establishes domain **33**, eight right-arm/gripper channels padded to
+64, one observed composite image, current-state action row zero, and 16 future action rows
+at 20 Hz. The adapter reuses the original compositor, prompt formatter, and quantile affine.
+The original training manifest and normalization statistics match the checkpoints.
 
 Also provide the tokenizer/processor snapshot and Wan VAE file: the training config references
 paths on another machine under `/scratch/t558a02/`. Supply local paths below. Matching snapshot
@@ -93,33 +95,39 @@ python3 scripts/prepare_observation.py \
 This saves only current images, current measured joints, a timestamp, and the instruction.
 It is an observation archive, not a native inference batch or a model prediction.
 
-For inference, the matching adapter must prepare a **single unbatched native inference sample**
-in a pickle-free NPZ archive. Use arrays for native tensor fields and scalar Unicode arrays for
-string fields, including the already formatted `ai_caption`. Preserve native dtypes, masks,
-embodiment ID, and current-state conditioning. Future target values must be inference placeholders.
-The runner follows the upstream policy service's native sample-to-batch conversion.
-
-Once that sample and the adapter/assets are available:
+Run inference directly from this recorded observation:
 
 ```bash
 python3 scripts/cosmos3.py infer \
   --variant edge --step 20000 --gpu 5 \
-  --sample inputs/native_sample.npz \
-  --adapter-dir /path/to/source-containing-bg2_cosmos \
+  --observation inputs/recorded_observation.npz \
   --tokenizer /path/to/matching/tokenizer-snapshot \
   --vae /path/to/Wan2.2_VAE.pth \
   --guidance-interval 960 1001
 ```
+
+The bundled adapter is mounted automatically. Current measured joints are normalized with
+the checkpoint's training-only statistics; all future action rows are zero placeholders.
+The native sequence plan conditions only the observed image and action row zero.
+Input archives reject extra fields, including future labels, and must use the saved joint order.
 
 For Nano, select `--variant nano` and its matching tokenizer; omit the Edge guidance interval
 unless the original evaluation configuration specifies it. `--seed`, `--steps`, `--guidance`,
 and `--shift` are configurable; defaults are the upstream server's 0, 4, 3.0, and 5.0.
 Add `--dry-run` to review the Docker command before launching it.
 
-Successful runs write a fresh `outputs/<variant>-<step>-<timestamp>-<id>/` directory containing
-`request.json`, `outputs.json`, `action_0.npy`, and vision latents when returned by the model.
-Actions are saved exactly as returned by the framework; no DROID gripper conversion, controller
-mapping, or action execution is applied. These are raw outputs, not validated hardware commands.
+Successful runs write a fresh `outputs/<variant>-<step>-<timestamp>-<id>/` directory containing:
+
+- `request.json`: checkpoint file identity, observation hash, adapter hashes, prompt, conditioning, and sampling settings.
+- `action_0.npy`: the native normalized 17-by-8 action output, including the conditioned current row.
+- `joint_positions.npy` and `joint_positions.json`: 16-by-8 absolute predictions in recorded radians, with joint names and forecast offsets of 0.05 through 0.8 seconds.
+- `outputs.json`: array shapes, loading/preprocessing/generation/decoding timings, and peak GPU memory.
+- `vision_0.npy` when the framework returns vision latents.
+
+The decoder checks that generation preserved current-state conditioning, drops row zero, and
+inverts the training affine once. It applies no clipping or gripper remapping. Hardware
+integration remains a separate stage. GPU end-to-end validation is still pending while the
+Docker images finish building; CPU agreement with training data alone is not a model run.
 
 ## Mounts
 
@@ -144,5 +152,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 These CPU checks cover incomplete checkpoints, corrupt shards, manifest traversal, Docker
-mount/network settings, and rejection of pickle inputs. GPU inference additionally needs the
-completed Docker image, matching adapter/assets, and a valid native inference sample.
+mount/network settings, rejection of pickle inputs and future labels, and decoding without clipping.
+When the supplied training bundle is available, they also compare exact pixels and normalized states at the
+first, middle, and tail samples against its actual loader. Set `BG2_TRAINING_BUNDLE` if that
+bundle is elsewhere; this reference check is skipped when the bundle is absent. GPU inference
+additionally needs the completed Docker image and matching assets.
