@@ -15,6 +15,9 @@ gateway or companion. The one-time FFW copy was completed at the user's request 
 for ordinary inference runs. FFW reuses its installed `robotis/ai-worker:2.2.8` image;
 no Docker build or download is needed.
 
+Remaining numerical/graph checks and the approved SmolVLA client handoff are recorded
+in [the runtime guard audit](runtime_guards_20261105.md).
+
 ## 1. Keep the robot stack running
 
 An already running ROBOTIS follower and its cameras can stay up. Do not run a second
