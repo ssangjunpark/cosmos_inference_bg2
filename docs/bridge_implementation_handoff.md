@@ -64,3 +64,15 @@ Raw image dimensions and orientation matching the training MP4 pipeline; install
 bringup/limits, actual selected homing YAML, active controllers and command ownership;
 router/live observation availability; warmed runtime compatible with the 0.8 s forecast.
 The reference profile must remain non-executable until real compatibility is established.
+
+## Later clarification and FFW inspection
+
+The user clarified that PRO 6000 runs inference, the 5090 is the communication gateway,
+and FFW owns robot control/sensors. The local Unix-socket draft needs a network transport
+for PRO 6000 ↔ 5090. Coding remains paused; only remote inspection was subsequently
+authorized. Both the 5090 and FFW must remain read-only.
+
+Read [FFW inspection results](ffw_read_only_inspection_20261104.md) before resuming.
+In particular, use the actual installed source revision, distinguish installed containers
+from inactive robot services, and do not feed eight-joint Cosmos output into the existing
+10-value end-effector adapter. Existing robot-side controller functionality should be reused.
