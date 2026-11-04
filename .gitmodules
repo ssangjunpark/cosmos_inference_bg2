@@ -1,0 +1,3 @@
+[submodule "third_party/cosmos-framework"]
+	path = third_party/cosmos-framework
+	url = https://github.com/NVIDIA/cosmos-framework.git

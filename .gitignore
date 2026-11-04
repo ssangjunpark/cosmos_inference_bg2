@@ -1,0 +1,17 @@
+.runtime/
+outputs/
+assets/
+inputs/*.npz
+__pycache__/
+*.pyc
+checkpoints/
+*.npy
+*.npz
+*.pt
+*.pth
+*.safetensors
+*.distcp
+*.ckpt
+.env
+.env.*
+!.env.example

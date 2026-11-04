@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/NVIDIA/cosmos-framework.git",
+  "commit": "b98934eda43f4d31972538a527f8663f003c27dc",
+  "source": "cosmos3_edge/020000/input_contract.json",
+  "guide": "docs/action_policy_droid_server.md"
+}

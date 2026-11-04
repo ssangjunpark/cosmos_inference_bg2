@@ -1,0 +1,4 @@
+# Run the dependency installation from NVIDIA's policy-server guide unchanged.
+ARG FRAMEWORK_IMAGE=cosmos-framework:robotescape-b98934e
+FROM ${FRAMEWORK_IMAGE}
+RUN uv sync --all-extras --group=cu130-torch213-train --group=policy-server
