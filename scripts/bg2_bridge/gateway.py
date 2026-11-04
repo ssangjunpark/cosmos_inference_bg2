@@ -13,6 +13,7 @@ from .core import JointFeedback, require, stamp_ns
 from .chunks import EXECUTION_CONTRACT, STATUS_SCHEMA
 from .observations import Observations
 from .rpc import identifier
+from .recording import RecordingError
 
 
 class StatusCache:
@@ -45,9 +46,10 @@ class StatusCache:
 
 
 class Gateway:
-    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview'):
+    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', recorder=None):
         self.observations, self.status, self.client = observations, status, client
         self.send_chunk, self.instruction, self.mode = send_chunk, instruction, mode
+        self.recorder = recorder
         self.epoch, self.awaiting, self.last_source_ns = None, None, 0
         self.forwarded, self.requests, self.failed, self.next_retry_ns = 0, 0, 0, 0
         self.closed, self.in_flight = False, False
@@ -56,6 +58,7 @@ class Gateway:
         return cached is not None and cached[0]['mode'] == self.mode and cached[0]['needs_chunk'] and cached[0]['phase'] in {'ready','holding'}
 
     def step(self, now_ns=None):
+        if self.recorder is not None:self.recorder.check()
         entered_ns = time.monotonic_ns()
         now_ns = entered_ns if now_ns is None else now_ns
         cached = self.status.get(now_ns)
@@ -78,7 +81,8 @@ class Gateway:
                 return None
             robot_now = current['robot_now_ns'] + (now_ns - received)
             observation = self.observations.snapshot(self.instruction, robot_now, receipt_now_ns=now_ns,
-                                                     not_before_ns=current['ready_since_ns'])
+                                                     not_before_ns=current['ready_since_ns'], include_raw=self.recorder is not None)
+            if self.recorder is not None:observation,raw_frames=observation
             source = int(observation['source_time_ns'])
             if source <= self.last_source_ns:
                 return None
@@ -90,8 +94,10 @@ class Gateway:
         self.in_flight = True
         started = time.monotonic_ns()
         try:
+            if self.recorder is not None:self.recorder.inputs(request_id,observation,raw_frames)
             # Blocking inference: FFW is holding, and no next request is prefetched.
             result = self.client.predict(observation, epoch, request_id)
+            if self.recorder is not None:self.recorder.prediction(result)
             elapsed = max(1, time.monotonic_ns() - started)
             latest = self.status.get(now_ns + time.monotonic_ns() - entered_ns)
             require(not self.closed and self.eligible(latest) and latest[0]['epoch'] == epoch and
@@ -102,6 +108,9 @@ class Gateway:
             self.forwarded += 1
             return {'event':'forwarded','request_id':request_id,'epoch':epoch,'cycle':cycle,
                     'source_time_ns':source,'roundtrip_seconds':elapsed/1e9,'timings':result.get('timings',{})}
+        except RecordingError:
+            self.closed = True
+            raise
         except Exception as error:
             self.failed += 1
             self.next_retry_ns = now_ns + max(1, time.monotonic_ns() - entered_ns) + 100_000_000
@@ -114,9 +123,10 @@ class Gateway:
 
 
 class GatewayTransport:
-    def __init__(self, profile, observations, status, *, inspect=False, sdk=None, messages_dir=None):
+    def __init__(self, profile, observations, status, *, inspect=False, sdk=None, messages_dir=None, recorder=None):
         self.profile,self.observations,self.status=profile,observations,status
         self.subscribers,self.chunk_publisher,self.control_publisher=[],None,None
+        self.recorder=recorder
         self.errors,self.last_error=0,None
         self.node_name='cosmos_gateway_'+uuid.uuid4().hex[:12]
         middleware=profile['middleware']
@@ -163,7 +173,9 @@ class GatewayTransport:
                                     stamp_ns(msg.header.stamp),time.monotonic_ns(),self.profile))
 
     def _camera(self,key,msg):
-        self.observations.add_camera(key,stamp_ns(msg.header.stamp),time.monotonic_ns(),bytes(msg.data))
+        source,receipt,payload=stamp_ns(msg.header.stamp),time.monotonic_ns(),bytes(msg.data)
+        self.observations.add_camera(key,source,receipt,payload)
+        if self.recorder is not None:self.recorder.camera(key,source,receipt,payload)
 
     def _status(self,msg):
         require(len(msg.data.encode())<=128*1024,'Oversized FFW status')
@@ -195,3 +207,31 @@ class GatewayTransport:
         for pub in (self.chunk_publisher,self.control_publisher):
             if pub is not None:pub.close()
         self.chunk_publisher=self.control_publisher=None
+
+
+class DebugGateway:
+    """Live policy prediction and recording only; no FFW status, controller or publishers."""
+    def __init__(self,observations,client,recorder,instruction):
+        self.observations,self.client,self.recorder,self.instruction=observations,client,recorder,instruction
+        self.epoch=uuid.uuid4().hex
+        self.closed,self.last_source_ns,self.requests,self.predictions=False,0,0,0
+
+    def close(self):self.closed=True
+
+    def step(self,now_ns=None):
+        if self.closed:return None
+        self.recorder.check()
+        now_ns=time.monotonic_ns() if now_ns is None else now_ns
+        with self.observations.lock:
+            if not self.observations.joints:return {'event':'waiting','reason':'Waiting for joint feedback'}
+            anchor=self.observations.joints[-1].source_ns
+        if anchor<=self.last_source_ns:return None
+        try:
+            observation,raw=self.observations.snapshot(self.instruction,anchor,receipt_now_ns=now_ns,include_raw=True)
+        except (ValueError,OSError) as error:return {'event':'waiting','reason':str(error)}
+        request_id=uuid.uuid4().hex;self.last_source_ns=int(observation['source_time_ns'])
+        self.recorder.inputs(request_id,observation,raw);self.requests+=1
+        result=self.client.predict(observation,self.epoch,request_id)
+        self.recorder.prediction(result);self.predictions+=1
+        return {'event':'prediction_saved','request_id':request_id,'epoch':self.epoch,
+                'source_time_ns':self.last_source_ns,'physical_publishing':False,'artifacts':result.get('artifacts')}

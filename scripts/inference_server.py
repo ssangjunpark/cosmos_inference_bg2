@@ -15,16 +15,19 @@ from bg2_bridge.core import require
 from bg2_bridge.chunks import SCHEMA
 from bg2_bridge.rpc import MAX_OBSERVATION, decode_observation, identifier
 from bg2_inference import JOINT_NAMES, load_observation
+from bg2_bridge.recording import save_model_result
 
 
 class PolicyService:
-    def __init__(self, factory, sampling, warmup, warmup_runs=2):
+    def __init__(self, factory, sampling, warmup, warmup_runs=2, output_dir=None):
         require(warmup_runs >= 1, 'At least one explicit warm-up is required')
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='cosmos-gpu')
         self.gate = threading.Lock()
         self.sampling = dict(sampling)
         self.durations = deque(maxlen=50)
         self.calls = 0
+        self.output_dir=Path(output_dir) if output_dir is not None else None
+        if self.output_dir is not None:self.output_dir.mkdir(parents=True,exist_ok=True)
         try:
             # Load, warm, and predict on the same dedicated thread. No CUDA request
             # concurrency and no new per-request GPU thread/handle warmup.
@@ -45,7 +48,7 @@ class PolicyService:
                 'future_steps': 16, 'frame_interval_ns': 50_000_000, 'loading_seconds': self.policy.loading_seconds,
                 'warmup_seconds': self.warmup_seconds, 'latency_budget_ns': int(max(values) * 1e9),
                 'median_prediction_seconds': statistics.median(values), 'prediction_calls': self.calls,
-                'sampling': self.sampling}
+                'sampling': self.sampling, 'mode': 'policy', 'records_outputs': self.output_dir is not None}
 
     def predict(self, observation, epoch, request_id):
         start = time.monotonic()
@@ -53,10 +56,13 @@ class PolicyService:
         elapsed = time.monotonic() - start
         self.durations.append(elapsed)
         self.calls += 1
-        return {'ok': True, 'schema': SCHEMA, 'epoch': epoch, 'request_id': request_id,
+        response = {'ok': True, 'schema': SCHEMA, 'epoch': epoch, 'request_id': request_id,
                 'source_time_ns': int(observation['source_time_ns']), 'joint_names': JOINT_NAMES,
                 'units': ['rad'] * 8, 'positions': result['positions'].tolist(),
                 'timings': {**result['timings'], 'service_prediction_seconds': elapsed}}
+        if self.output_dir is not None:
+            response['artifacts']=save_model_result(self.output_dir,observation,result,response,self.sampling)
+        return response
 
     def close(self):
         self.pool.shutdown(wait=True)
@@ -131,6 +137,7 @@ def main():
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8008)
     parser.add_argument('--warmup-runs', type=int, default=2)
+    parser.add_argument('--output', type=Path, default=Path('/results'))
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=4)
     parser.add_argument('--guidance', type=float, default=3.)
@@ -140,7 +147,7 @@ def main():
     from policy_runtime import NativePolicy
     sampling = {k: getattr(args, k) for k in ['seed', 'steps', 'guidance', 'shift', 'guidance_interval']}
     service = PolicyService(lambda: NativePolicy(args.checkpoint, args.tokenizer, args.vae, args.adapter_dir),
-                            sampling, load_observation(args.warmup_observation), args.warmup_runs)
+                            sampling, load_observation(args.warmup_observation), args.warmup_runs, args.output)
     server = make_server((args.bind, args.port), service)
     print(json.dumps({'event': 'ready', **service.health()}), flush=True)
     def stop(*_):

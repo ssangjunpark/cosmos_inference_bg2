@@ -31,7 +31,7 @@ def build(output):
                "messages/sensor_msgs/msg/CompressedImage.msg", "messages/sensor_msgs/msg/JointState.msg")
     for name in templates:copy(ROOT/"deploy/gateway"/name,Path(name))
     for name in ("gateway.py","bg2_inference.py"):copy(ROOT/"scripts"/name,Path("scripts")/name)
-    for name in ("__init__.py","core.py","chunks.py","observations.py","rpc.py","gateway.py"):
+    for name in ("__init__.py","core.py","chunks.py","observations.py","rpc.py","gateway.py","recording.py"):
         copy(ROOT/"scripts/bg2_bridge"/name,Path("scripts/bg2_bridge")/name)
     copy(ROOT/"profiles/robotis_bg2_rev4.reference.json",Path("config/profile.reference.json"))
     for name in ("LICENSE","README.md","pyproject.toml","setup.py"):

@@ -63,7 +63,7 @@ class Observations:
         frame.fresh(now_ns)
         return frame
 
-    def snapshot(self, instruction, now_ns, *, receipt_now_ns=None, not_before_ns=0):
+    def snapshot(self, instruction, now_ns, *, receipt_now_ns=None, not_before_ns=0, include_raw=False):
         receipt_now_ns = now_ns if receipt_now_ns is None else receipt_now_ns
         validate_profile(self.profile, live=True)
         require(isinstance(instruction, str) and instruction.strip(), "Instruction is empty")
@@ -91,4 +91,4 @@ class Observations:
         result.update(joint_position=np.asarray([joint.positions[n] for n in JOINT_NAMES], dtype=np.float32),
                       source_time_ns=np.asarray(joint.source_ns, dtype=np.int64), instruction=np.asarray(instruction),
                       joint_names=np.asarray(JOINT_NAMES), format=np.asarray(FORMAT))
-        return result
+        return (result, frames) if include_raw else result

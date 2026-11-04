@@ -56,3 +56,29 @@ The updated companion uses status schema `cosmos_bg2_status_v2` and execution co
 `synchronous_full_chunk_v1`. Update both copies together; old async copies are incompatible.
 The output-only model RPC remains unchanged. See the synchronous execution contract in
 the main repository for stop limits and completion semantics.
+
+## Live debug without movement
+
+Use `execute --debug --instruction "YOUR TASK"` with the same profile/server/output
+arguments. `--debug` is prediction-only regardless of the mode name: it creates only
+four sensor subscriptions, no chunk/control publishers, and needs no FFW companion,
+homing status, or execution-enabled profile. Verified camera transforms and fresh,
+aligned sensor data are still required. Start it only after the operator has placed
+the robot in the intended initial pose and checked all streams. It does not start or
+verify homing. No imagined future video is generated: the request remains policy mode.
+
+Both debug and normal operation record continuous original compressed camera packets
+in `logs/<run>/cameras/*.mkv`, with exact sensor/receipt timestamps in JSONL sidecars.
+Matroska playback timestamps may be quantized; sidecars retain the original nanoseconds.
+The camera streams are recorded independently, without frame-rate resampling. A stopped
+or disconnected camera contributes no invented frames. Exact raw and processed inputs,
+current measured joints, task text, and the 16 predicted targets are saved separately
+for each prediction. PRO 6000 saves its model outputs under
+`outputs/server-edge/requests/<epoch>/<request_id>/` (or `server-nano`), linked in the
+prediction reply. The visual tensor is the conditioned context latent, not a future
+rollout; no extra video generation or VAE decoding is performed.
+
+Ctrl+C ends debug and finalizes recordings without sending a robot stop command.
+Optional `--max-predictions N` ends a debug session after N saved predictions.
+A recording failure ends the gateway; it never forwards a prediction it failed to save.
+Normal execution still uses the matching synchronous FFW companion and its motion gates.

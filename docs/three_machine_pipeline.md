@@ -39,6 +39,10 @@ For the camera/joint-state check without policy commands, use the
 [observation-only commands](observation_only_bringup.md). That pass disables homing
 and does not start our companion.
 
+For live predictions without movement or a companion, use the
+[policy debug guide](policy_debug.md). The first live debug run waits until the operator
+has placed the robot in its intended initial pose and verified all streams.
+
 ## Start the model server on PRO 6000
 
 Use a free GPU explicitly. This example uses the verified official base image and

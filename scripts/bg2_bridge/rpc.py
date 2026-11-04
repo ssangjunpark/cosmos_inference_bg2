@@ -59,7 +59,13 @@ class InferenceClient:
             headers = dict(extra or {})
             if body is not None:
                 headers['Content-Type'] = 'application/x-npz'
-            connection.request(method, path, body=body, headers=headers)
+            try:
+                connection.request(method, path, body=body, headers=headers)
+            except BrokenPipeError:
+                # The service can reject a busy request immediately after headers,
+                # before the observation finishes uploading. Read its HTTP error.
+                # A genuine dropped connection still fails in getresponse().
+                pass
             response = connection.getresponse()
             payload = response.read(MAX_REPLY + 1)
             require(len(payload) <= MAX_REPLY, 'Oversized inference response')
