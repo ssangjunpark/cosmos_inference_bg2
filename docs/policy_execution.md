@@ -60,7 +60,7 @@ ssh -N -T -o ExitOnForwardFailure=yes \
 Keep it open. If a working tunnel already occupies 18008, reuse it instead of starting
 another. Verify on 5090 with `curl --fail http://127.0.0.1:18008/health`.
 
-## 4. FFW: installation complete; check and start
+## 4. FFW: installation complete; check files only
 
 The copy is already complete. From a terminal on 5090:
 
@@ -79,44 +79,57 @@ FFW_PROFILE=./config/profile.execute.json COSMOS_MODE=execute \
   --initial-positions /config/initial_positions.yaml --mode execute --initialization current --check
 ```
 
-Proceed only when it reports `valid: true`. Start the companion from the current pose:
+Proceed only when it reports `valid: true`. Complete the SNUPI startup below before
+starting the companion.
+
+## 5. FFW: finish SNUPI homing first, then start the companion
+
+If ROBOTIS is already running, homed to SNUPI, and all three cameras are streaming,
+leave the follower running and skip the homing launch. To intentionally home again,
+stop the 5090 gateway first, then stop our companion on the FFW host:
 
 ```bash
-FFW_PROFILE=./config/profile.execute.json COSMOS_MODE=execute COSMOS_INITIALIZATION=current \
-  docker compose up --no-build --pull never
+cd ~/cosmos_ffw_companion
+docker compose down --timeout 3
 ```
 
-Keep this terminal open between tasks. It waits for fresh settled feedback and healthy
-controllers, then holds the measured pose. There is no copy/build/homing step between
-prompts. This update uses status schema `cosmos_bg2_status_v3` and execution contract
-`synchronous_full_chunk_v2`; update gateway and companion together once.
-
-## 5. FFW: verify the robot and companion are ready
-
-If the follower is already running, leave it running. Otherwise, enter the existing
-container and start sensors/controllers without automatic homing:
+Stop any previous follower launch in its original terminal before launching another.
+Enter the existing ai_worker container and request the SNUPI pose:
 
 ```bash
 docker exec -it ai_worker bash
 ros2 launch ffw_bringup ffw_bg2_follower_ai.launch.py \
   launch_cameras:=true \
-  init_position:=false \
+  init_position:=true \
   init_position_file:=bg2_vr_startup_snupi.yaml \
   use_head_eef_tracker:=false
 ```
 
-Use `init_position:=true` only when you intentionally want ROBOTIS to move to SNUPI.
-Finish any such homing before starting the companion in current-pose mode. The
-companion does not trigger homing itself. In another ai_worker shell:
+Wait for all homing to finish and all three camera streams to appear. Leave this
+follower terminal open. On the FFW host in another terminal, start the companion:
+
+```bash
+cd ~/cosmos_ffw_companion
+FFW_PROFILE=./config/profile.execute.json COSMOS_MODE=execute COSMOS_INITIALIZATION=current \
+  docker compose up --no-build --pull never
+```
+
+Current mode captures the measured pose; do not intentionally home while it is holding
+or executing. Leave the companion and follower running between ordinary prompts.
+There is no copy/build/homing step between prompts. The protocol is status schema
+`cosmos_bg2_status_v3` and execution contract `synchronous_full_chunk_v2`.
+
+In another ai_worker shell, observe readiness:
 
 ```bash
 ros2 topic echo /cosmos/bg2/status --field data
 ```
 
 Wait for `mode: execute`, `initialization: current`, and phase `ready`, `holding`,
-or `paused`. Ready/holding has `needs_chunk: true`; paused intentionally has false.
-A new gateway resumes a paused companion before capturing fresh inputs. Ctrl+C stops
-only this status display. A fault or competing publisher must be diagnosed, not bypassed.
+or `paused`. A fresh gateway resumes a paused companion. A latched fault remains a
+fault even after ROBOTIS finishes homing: with the gateway stopped, restart only the
+companion after the robot is settled. Do not relaunch the follower to clear a companion
+fault. This captures a new measured hold without requesting another home move.
 
 ## 6. 5090: start normal inference last
 
