@@ -58,7 +58,7 @@ automatic task-completion detector. Keep FFW untouched by our deployment for thi
 prediction-only pass. Do not start a second gateway concurrently.
 
 Normal inference uses the same command without `--debug`, but requires the matching
-FFW companion, a hardware-verified enabled profile, and fresh external homing for the
+FFW companion, a hardware-verified enabled profile, and current-pose initialization (or optional fresh homing) for the
 companion session. Normal execution follows the synchronous full-chunk contract;
 debug does not simulate robot execution or claim to validate physical tracking.
 
@@ -66,7 +66,7 @@ debug does not simulate robot execution or claim to validate physical tracking.
 
 On the 5090, `~/cosmos_bg2_gateway/logs/<run>/` contains:
 
-- `cameras/{head,wrist_left,wrist}.mkv`: continuous original JPEG/PNG packets as received.
+- `cameras/{head,wrist_left,wrist}.mkv`: continuous original JPEG packets as received.
 - Matching `.timestamps.jsonl`: exact source and receipt nanoseconds per received frame.
 - `predictions/<request_id>/`: the exact raw selected images, processed RGB PNGs,
   combined policy input image, observation NPZ/JSON, and prediction JSON with all 16 targets.

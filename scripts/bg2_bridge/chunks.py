@@ -1,13 +1,14 @@
-"""Synchronous full-chunk execution and terminal motion-limit stops on FFW."""
+"""Synchronous full chunks, measured-position pause/resume, and terminal faults."""
 from collections import deque
 import re
+import uuid
 
 from .core import (MAX_ANGULAR_ERROR, MAX_ANGULAR_VELOCITY, angular_names,
                    hold_messages, require, safety_require, trajectories)
 
 SCHEMA = "cosmos_bg2_joint_chunk_v1"  # Model RPC remains output-only and unchanged.
-EXECUTION_CONTRACT = "synchronous_full_chunk_v1"
-STATUS_SCHEMA = "cosmos_bg2_status_v2"
+EXECUTION_CONTRACT = "synchronous_full_chunk_v2"
+STATUS_SCHEMA = "cosmos_bg2_status_v3"
 
 
 class ChunkExecutor:
@@ -71,7 +72,7 @@ class ChunkExecutor:
 
     def monitor(self, feedback, now_ns):
         feedback.fresh(now_ns)
-        if self.startup.phase not in ("ready", "running", "holding"):
+        if self.startup.phase not in ("ready", "running", "holding", "paused"):
             return
         expected = dict(self.startup.hold)
         expected.update(self.expected_right(feedback.source_ns))
@@ -82,7 +83,7 @@ class ChunkExecutor:
                            f"Angular tracking error exceeds 10 degrees: {name}")
 
     def tick(self, feedback, now_ns, *, submit=None, monitor=True):
-        if self.startup.phase not in ("ready", "running", "holding"):
+        if self.startup.phase not in ("ready", "running", "holding", "paused"):
             return None
         feedback.fresh(now_ns)
         if monitor:
@@ -105,6 +106,37 @@ class ChunkExecutor:
             self.ready_since_ns = now_ns
             return commands
         return None
+
+    def pause(self, feedback, now_ns, *, submit=None, monitor=True):
+        require(self.startup.phase in ("ready", "running", "holding") and self.ready_since_ns > 0,
+                "Only an initialized active session can pause")
+        if monitor:
+            self.monitor(feedback, now_ns)
+        commands = hold_messages(feedback, self.startup, now_ns, include_right=True, stop_all=True)
+        if submit is not None:
+            submit(commands)
+        self.startup.hold = dict(feedback.positions)
+        self.right_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
+        self.execution_end_ns, self.ready_since_ns = 0, 0
+        self.last_commands = commands
+        self.startup.phase, self.startup.epoch = "paused", uuid.uuid4().hex
+        self.cycle += 1
+        return commands
+
+    def resume(self, feedback, now_ns, *, submit=None, monitor=True):
+        require(self.startup.phase == "paused", "Only a paused session can resume; faults remain terminal")
+        if monitor:
+            self.monitor(feedback, now_ns)
+        commands = hold_messages(feedback, self.startup, now_ns, include_right=True, stop_all=True)
+        if submit is not None:
+            submit(commands)
+        self.startup.hold = dict(feedback.positions)
+        self.right_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
+        self.startup.phase, self.startup.epoch = "holding", uuid.uuid4().hex
+        self.cycle += 1
+        self.execution_end_ns, self.ready_since_ns = 0, now_ns
+        self.last_commands, self.last_request_id, self.last_completed_request_id = commands, None, None
+        return commands
 
     def stop(self, feedback, now_ns, *, fault=False):
         self.execution_end_ns, self.ready_since_ns = 0, 0

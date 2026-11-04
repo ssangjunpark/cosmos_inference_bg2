@@ -11,7 +11,7 @@ from .chunks import ChunkExecutor
 from .ros_messages import joint_trajectory
 
 
-def make_node(profile, home, mode):
+def make_node(profile, home, mode, *, require_homing=True):
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy, ReliabilityPolicy
     from sensor_msgs.msg import JointState
@@ -25,12 +25,12 @@ def make_node(profile, home, mode):
             super().__init__("cosmos_ffw_companion")
             require(self.get_parameter("use_sim_time").value is False, "Physical executor requires the robot clock, not simulated time")
             self.mode = mode
-            self.startup = Startup(profile, home, self.now())
+            self.startup = Startup(profile, home, self.now(), require_homing=require_homing)
             self.engine = ChunkExecutor(self.startup)
             self.feedback, self.command_publishers = None, {}
             self.controller_ok_at, self.pending_query = 0., None
             self.query_started = 0.
-            self.reason, self.last_rejection, self.command_count = "Waiting for ROBOTIS homing", None, 0
+            self.reason, self.last_rejection, self.command_count = ("Waiting for ROBOTIS homing" if require_homing else "Waiting for settled current joint feedback"), None, 0
             self.closing, self.stop_sent = False, False
             self.initial_hold_sent = False
             self.activation_started = None
@@ -167,10 +167,25 @@ def make_node(profile, home, mode):
                 data = json.loads(msg.data)
                 require(data.get("schema") == "cosmos_bg2_control_v1" and data.get("epoch") == self.startup.epoch,
                         "Control message session mismatch")
-                require(data.get("command") == "stop", "Only stop is supported; restart and home for a new session")
-                self.shutdown_hold()
+                command = data.get("command")
+                require(command in {"pause", "resume", "stop"}, "Unknown control command")
+                if command == "stop":
+                    self.shutdown_hold()
+                    return
+                require(not self.closing and self.initial_hold_sent, "Companion is not initialized")
+                if self.mode == "execute":
+                    self.guard()
+                require(self.feedback is not None, "Waiting for feedback")
+                method = self.engine.pause if command == "pause" else self.engine.resume
+                method(self.feedback, self.now(), submit=self.send, monitor=self.mode == "execute")
+                self.stop_sent = False
+                self.reason, self.last_rejection = ("Paused at measured position" if command == "pause" else "Resumed from measured position"), None
+            except SafetyStop as error:
+                self.fault(str(error))
             except (ValueError, KeyError, TypeError) as error:
                 self.last_rejection = str(error)
+            except Exception as error:
+                self.fault("Control publication failed: " + str(error))
 
         def fault(self, reason):
             if self.startup.phase == "fault" and self.reason == reason:
@@ -193,7 +208,7 @@ def make_node(profile, home, mode):
                 return
             try:
                 self.engine.clock(self.now(), time.monotonic_ns())
-                if self.startup.phase in ("ready", "running", "holding"):
+                if self.startup.phase in ("ready", "running", "holding", "paused"):
                     require(self.feedback is not None, "No feedback")
                     can_tick = True
                     if self.mode == "execute":
@@ -213,7 +228,7 @@ def make_node(profile, home, mode):
                                 self.guard()
                     if can_tick:
                         commands = self.engine.tick(self.feedback, self.now(), submit=self.send, monitor=self.mode == "execute")
-                        self.initial_hold_sent = self.engine.ready_since_ns > 0
+                        self.initial_hold_sent = self.initial_hold_sent or self.engine.ready_since_ns > 0
                         if commands is not None:
                             self.reason = "Holding the commanded position; ready for the next synchronous request"
             except (ValueError, KeyError) as error:
@@ -221,7 +236,7 @@ def make_node(profile, home, mode):
             except Exception as error:
                 self.fault("Trajectory/hold publication failed: " + str(error))
             status = self.engine.status(self.now())
-            status.update(mode=self.mode, physical_publishing=self.mode == "execute", command_messages=self.command_count,
+            status.update(mode=self.mode, initialization="homing" if require_homing else "current", physical_publishing=self.mode == "execute", command_messages=self.command_count,
                           reason=self.reason, last_rejection=self.last_rejection,
                           controllers_ready=self.controller_ok_at > 0 and time.monotonic() - self.controller_ok_at <= 1.)
             self.status_pub.publish(String(data=json.dumps(status, allow_nan=False)))
@@ -253,13 +268,14 @@ def main():
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--initial-positions", type=Path, required=True)
     parser.add_argument("--mode", choices=("preview", "execute"), default="preview")
+    parser.add_argument("--initialization", choices=("current", "homing"), default="current")
     parser.add_argument("--check", action="store_true", help="Validate files only; do not import/init ROS or connect")
     args = parser.parse_args()
     profile = json.loads(args.profile.read_text())
     validate_profile(profile, live=args.mode == "execute", execute=args.mode == "execute")
-    home = load_home_yaml(args.initial_positions, profile)
+    home = load_home_yaml(args.initial_positions, profile, validate_targets=args.initialization == "homing")
     if args.check:
-        print(json.dumps({"valid": True, "mode": args.mode, "homing_groups": sorted(home), "robot_connection_opened": False}))
+        print(json.dumps({"valid": True, "mode": args.mode, "homing_groups": sorted(home), "initialization": args.initialization, "robot_connection_opened": False}))
         return
     import rclpy
     from rclpy.signals import SignalHandlerOptions
@@ -272,7 +288,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     try:
-        node = make_node(profile, home, args.mode)
+        node = make_node(profile, home, args.mode, require_homing=args.initialization == "homing")
         while not stopping and rclpy.ok():
             rclpy.spin_once(node, timeout_sec=.05)
     finally:

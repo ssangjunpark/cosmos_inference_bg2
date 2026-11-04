@@ -4,6 +4,19 @@ Agreed with the user on 2026-11-04. This supersedes the earlier asynchronous bri
 Implementation and bundles are prepared on PRO 6000. Updating this source does not deploy
 it to 5090 or FFW, and no motion was started during this change.
 
+## Current startup and pause/resume behavior (2026-11-05)
+
+The [normal execution guide](policy_execution.md) supersedes the earlier mandatory
+fresh-homing restart procedure below. Current-pose startup is the default, with the
+existing 500 ms settling check; fresh homing is optional (`COSMOS_INITIALIZATION=homing`).
+Normal gateway Ctrl+C pauses at measured positions, confirms the paused epoch and closes
+recordings. A new gateway prompt resumes from fresh state/images without restarting the
+companion or homing. Faults remain terminal. Status schema is `cosmos_bg2_status_v3` and
+execution contract `synchronous_full_chunk_v2`; update both deployment copies once.
+Negative predicted right-gripper targets are floored to 0 on PRO 6000 as authorized;
+the bridge forwards the resulting 16 targets unchanged. Historical startup/validation
+notes below describe the earlier revision, not the current default.
+
 ## One cycle
 
 1. ROBOTIS completes the session's initial homing. The companion observes fresh success

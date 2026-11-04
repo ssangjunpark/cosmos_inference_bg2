@@ -52,8 +52,8 @@ uses a previous prediction as the current state. It forwards all 16 unchanged ta
 
 No prefetch or request during motion remains. After forwarding, even an old ready status
 cannot trigger another request: FFW must acknowledge the matching completed request/cycle.
-The updated companion uses status schema `cosmos_bg2_status_v2` and execution contract
-`synchronous_full_chunk_v1`. Update both copies together; old async copies are incompatible.
+The updated companion uses status schema `cosmos_bg2_status_v3` and execution contract
+`synchronous_full_chunk_v2`. Update both copies together; old async copies are incompatible.
 The output-only model RPC remains unchanged. See the synchronous execution contract in
 the main repository for stop limits and completion semantics.
 
@@ -82,3 +82,10 @@ Ctrl+C ends debug and finalizes recordings without sending a robot stop command.
 Optional `--max-predictions N` ends a debug session after N saved predictions.
 A recording failure ends the gateway; it never forwards a prediction it failed to save.
 Normal execution still uses the matching synchronous FFW companion and its motion gates.
+
+Normal execute Ctrl+C requests a measured-position pause, waits up to one second for
+FFW acknowledgement, and closes recordings. A new gateway command with a new instruction
+resumes only a paused healthy companion, then captures post-resume inputs. Faults do not
+auto-resume. The companion can initialize from current settled feedback without homing;
+see the normal execution guide in the repository. Copy updated code once per revision,
+not once per prompt. Debug remains subscriptions/predictions/recordings only.

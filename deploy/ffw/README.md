@@ -13,8 +13,9 @@ requested. `deploy/ffw` is source; `transfer/ffw` is the complete generated fold
 
 ## Synchronous behavior
 
-1. Start the companion before ROBOTIS homing. It observes fresh success for both arms,
-   head and elevator, checks 500 ms settling, captures measured holds, and publishes readiness.
+1. Start from current pose (default): check fresh settled measured feedback for 500 ms,
+   capture all holds, then publish readiness. Optional `COSMOS_INITIALIZATION=homing`
+   requires fresh ROBOTIS homing instead.
 2. 5090 collects fresh measured joints and all three cameras after the hold timestamp.
    PRO 6000 calculates one prediction while FFW holds.
 3. FFW sends all 16 unchanged right-arm/gripper targets at 50..800 ms from execution start.
@@ -46,14 +47,15 @@ All three messages use `std_msgs/msg/String` over the existing Zenoh router (dom
 TCP 7447). No direct PRO 6000 connection is made by this companion.
 
 - `/cosmos/bg2/chunk`: schema `cosmos_bg2_joint_chunk_v1`, execution contract
-  `synchronous_full_chunk_v1`, current epoch/cycle, unique request ID, original observation
+  `synchronous_full_chunk_v2`, current epoch/cycle, unique request ID, original observation
   timestamp, eight radian joint names/units, and exactly 16×8 absolute positions.
-- `/cosmos/bg2/status`: schema `cosmos_bg2_status_v2`, execution contract, epoch, phase,
+- `/cosmos/bg2/status`: schema `cosmos_bg2_status_v3`, execution contract, epoch, phase,
   integer cycle, `ready_since_ns`, `execution_end_ns`, remaining time, last submitted and
   completed request IDs, readiness, mode, controller health and diagnostic reason.
-- `/cosmos/bg2/control`: schema `cosmos_bg2_control_v1`, current epoch, command `stop`.
+- `/cosmos/bg2/control`: schema `cosmos_bg2_control_v1`, current epoch, command `pause`,
+  `resume`, or terminal `stop`. Pause/resume rotate epochs to reject late old commands.
 
-Old async deployment copies fail this contract. Update the gateway and companion together.
+Earlier deployment copies fail this contract. Update the gateway and companion together.
 A missing chunk/completion acknowledgement leaves the gateway waiting, not requesting again.
 
 ## Run later on FFW
@@ -74,7 +76,7 @@ docker compose run --rm companion \
 docker compose up --no-build --pull never
 ```
 
-Default is preview. Code/profile/home mounts and the root filesystem are read-only;
+Default is preview with current-pose initialization. Code/profile/home mounts and the root filesystem are read-only;
 there are no serial devices, GPU, Docker socket or privileged mounts. The existing local
 Zenoh router is reused. This container does not start ROBOTIS or homing.
 
@@ -87,10 +89,15 @@ also remains unverified with execution disabled.
 
 ## Restart, rollback and validation boundary
 
-Each new companion session requires fresh external homing; there is no homing between
-chunks. Explicit stop, a limit violation or external rehoming disarms the session.
-Restart the companion before fresh homing to resume. Restarting PRO 6000 alone does not
-restart this process. The gateway's explicit execute-mode shutdown sends a stop request.
+Ordinary Ctrl+C on the execute gateway pauses at measured positions and leaves the
+companion alive. Repeat the gateway command with a new prompt/output directory to resume
+from fresh measurements; no copy, companion restart or homing is needed. Current-pose
+initialization is the default even after a companion restart. Set
+`COSMOS_INITIALIZATION=homing` to require fresh external homing explicitly.
+Faults, terminal stop, or external rehoming invalidate the active session and cannot
+auto-resume. Diagnose faults before restarting; current-pose mode does not demand homing.
+Restarting PRO 6000 alone does not restart this process. Paused holds retain all motion,
+feedback, ownership and controller checks.
 
 To remove only this service, use `docker compose down --timeout 10` from its folder.
 That leaves existing ROBOTIS services and the reused image intact. It does not undo

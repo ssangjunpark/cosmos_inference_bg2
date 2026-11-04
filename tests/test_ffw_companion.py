@@ -456,6 +456,22 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIsNone(node.startup.hold)
         self.assertEqual(node.command_count,before)
 
+    def test_pause_resume_control_keeps_node_alive_and_publishers_unchanged(self):
+        import time
+        from types import SimpleNamespace as NS
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        publishers=dict(node.command_publishers);old=node.startup.epoch
+        node.control(NS(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':old,'command':'pause'})))
+        self.assertEqual(node.startup.phase,'paused');self.assertFalse(node.closing)
+        node.tick();paused=json.loads(node.status_pub.sent[-1].data)
+        self.assertFalse(paused['needs_chunk']);self.assertEqual(paused['phase'],'paused')
+        node.robot_ns+=50_000_000;node.feedback=feedback(profile(),node.robot_ns)
+        node.control(NS(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':paused['epoch'],'command':'resume'})))
+        self.assertEqual(node.startup.phase,'holding');self.assertEqual(node.command_publishers,publishers)
+        self.assertFalse(node.closing);self.assertEqual(node.engine.ready_since_ns,node.robot_ns)
+        node.control(NS(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':old,'command':'resume'})))
+        self.assertEqual(node.startup.phase,'holding');self.assertIn('mismatch',node.last_rejection)
+
     def test_shutdown_announces_a_valid_stopped_epoch_without_preview_commands(self):
         import re
         node=self.make_ready(self.node('preview'))

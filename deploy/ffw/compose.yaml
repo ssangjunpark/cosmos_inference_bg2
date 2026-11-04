@@ -53,4 +53,4 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    command: ["--profile", "/config/profile.json", "--initial-positions", "/config/initial_positions.yaml", "--mode", "${COSMOS_MODE:-preview}"]
+    command: ["--profile", "/config/profile.json", "--initial-positions", "/config/initial_positions.yaml", "--mode", "${COSMOS_MODE:-preview}", "--initialization", "${COSMOS_INITIALIZATION:-current}"]

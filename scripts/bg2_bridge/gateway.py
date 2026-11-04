@@ -25,7 +25,7 @@ class StatusCache:
         require(isinstance(value, dict) and value.get('schema') == STATUS_SCHEMA and
                 value.get('execution_contract') == EXECUTION_CONTRACT, 'Synchronous FFW status required')
         identifier(value.get('epoch'))
-        require(value.get('phase') in {'initializing','settling','ready','running','holding','fault','stopped'}, 'Invalid FFW phase')
+        require(value.get('phase') in {'initializing','settling','ready','running','holding','paused','fault','stopped'}, 'Invalid FFW phase')
         require(value.get('mode') in {'preview','execute'}, 'Invalid FFW mode')
         require(type(value.get('robot_now_ns')) is int and value['robot_now_ns'] > 0, 'Invalid robot status clock')
         require(type(value.get('cycle')) is int and value['cycle'] >= 0, 'Invalid execution cycle')
@@ -46,10 +46,11 @@ class StatusCache:
 
 
 class Gateway:
-    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', recorder=None):
+    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', recorder=None, send_control=None):
         self.observations, self.status, self.client = observations, status, client
         self.send_chunk, self.instruction, self.mode = send_chunk, instruction, mode
         self.recorder = recorder
+        self.send_control, self.resume_sent_epoch, self.next_resume_retry_ns = send_control, None, 0
         self.epoch, self.awaiting, self.last_source_ns = None, None, 0
         self.forwarded, self.requests, self.failed, self.next_retry_ns = 0, 0, 0, 0
         self.closed, self.in_flight = False, False
@@ -62,6 +63,14 @@ class Gateway:
         entered_ns = time.monotonic_ns()
         now_ns = entered_ns if now_ns is None else now_ns
         cached = self.status.get(now_ns)
+        if (not self.closed and not self.in_flight and self.requests == 0 and self.mode == 'execute' and
+                cached is not None and cached[0]['mode'] == self.mode and cached[0]['phase'] == 'paused' and
+                cached[0].get('controllers_ready') is True and self.send_control is not None):
+            if self.resume_sent_epoch != cached[0]['epoch'] or now_ns >= self.next_resume_retry_ns:
+                self.send_control(cached[0]['epoch'], 'resume')
+                self.resume_sent_epoch = cached[0]['epoch']
+                self.next_resume_retry_ns = now_ns + 100_000_000
+                return {'event':'resume_requested','epoch':cached[0]['epoch']}
         if self.closed or self.in_flight or not self.eligible(cached):
             return {'event':'waiting','reason':'Waiting for FFW to finish all points and hold'}
         current, received = cached
@@ -185,9 +194,13 @@ class GatewayTransport:
         require(self.chunk_publisher is not None,'Inspect mode cannot forward chunks')
         self.chunk_publisher.publish(data=json.dumps(result,allow_nan=False))
 
-    def stop(self,epoch):
+    def control(self,epoch,command):
+        require(command in {'pause','resume','stop'}, 'Unsupported control command')
         if self.control_publisher is not None:
-            self.control_publisher.publish(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':epoch,'command':'stop'}))
+            self.control_publisher.publish(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':epoch,'command':command}))
+
+    def stop(self,epoch):
+        self.control(epoch,'stop')
 
     def diagnostics(self,now_ns):
         with self.observations.lock:

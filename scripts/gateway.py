@@ -18,6 +18,27 @@ from bg2_bridge.recording import RunRecorder
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def finish_control(transport,status,command):
+    """Best-effort control with an observed acknowledgement before closing transport."""
+    current=status.get(time.monotonic_ns())
+    if current is None or current[0]['mode']!='execute':
+        return {'event':'control_not_confirmed','command':command,'reason':'No fresh FFW status'}
+    if command=='pause' and current[0]['phase']=='paused':
+        return {'event':'pause_confirmed','epoch':current[0]['epoch']}
+    if current[0]['phase'] not in {'ready','running','holding','paused'}:
+        return {'event':'control_not_sent','command':command,'phase':current[0]['phase']}
+    epoch=current[0]['epoch']
+    transport.control(epoch,command)
+    deadline=time.monotonic()+1.
+    wanted='paused' if command=='pause' else 'stopped'
+    while time.monotonic()<deadline:
+        latest=status.get(time.monotonic_ns())
+        if latest and latest[0]['phase']==wanted and latest[0]['epoch']!=epoch:
+            return {'event':command+'_confirmed','epoch':latest[0]['epoch']}
+        time.sleep(.01)
+    return {'event':'control_not_confirmed','command':command,'reason':'No FFW acknowledgement; check robot status'}
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=('inspect','preview','execute','replay'))
@@ -72,13 +93,13 @@ def main(argv=None):
         stopped=True
         if engine is not None: engine.close()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-    start=time.monotonic();last_report=0.;last_event=None
+    start=time.monotonic();last_report=0.;last_event=None;normal_exit=False
     try:
         transport=GatewayTransport(profile,observations,status,inspect=args.mode=='inspect' or args.debug,messages_dir=args.messages_dir,recorder=recorder)
         if args.debug:
             engine=DebugGateway(observations,client,recorder,args.instruction)
         elif client is not None:
-            engine=Gateway(observations,status,client,transport.send_chunk,args.instruction,args.mode,recorder=recorder)
+            engine=Gateway(observations,status,client,transport.send_chunk,args.instruction,args.mode,recorder=recorder,send_control=transport.control)
         with (args.output/'events.jsonl').open('x') as journal:
             if health:journal.write(json.dumps({'event':'server_ready','health':health})+'\n')
             while not stopped and (args.duration==0 or time.monotonic()-start<args.duration):
@@ -88,19 +109,20 @@ def main(argv=None):
                     journal.write(json.dumps(event,allow_nan=False)+'\n');journal.flush();last_event=event
                 if args.debug and args.max_predictions and engine.predictions>=args.max_predictions:break
                 if time.monotonic()-last_report>=1:
-                    summary={'event':'observations','data':transport.diagnostics(now),'gateway_event':last_event}
+                    summary={'event':'observations','data':transport.diagnostics(time.monotonic_ns()),'gateway_event':last_event}
                     journal.write(json.dumps(summary,allow_nan=False)+'\n');journal.flush()
                     print(json.dumps(summary),flush=True);last_report=time.monotonic()
                 time.sleep(.01)
+        normal_exit=True
     finally:
-        # A requested stop is best effort; the FFW's independent final-command hold remains
-        # responsible for network-loss behavior. No joint command is sent here.
-        current=status.get(time.monotonic_ns())
-        if transport is not None and engine is not None and not args.debug and args.mode=='execute' and engine.forwarded and current and current[0]['mode']=='execute':
+        # Ctrl+C/duration expiry pause; unexpected failures retain a terminal stop.
+        if transport is not None and engine is not None and not args.debug and args.mode=='execute':
             try:
-                transport.stop(current[0]['epoch'])
+                event=finish_control(transport,status,'pause' if normal_exit else 'stop')
+                print(json.dumps(event),flush=True)
+                with (args.output/'events.jsonl').open('a') as journal:journal.write(json.dumps(event)+'\n')
             except Exception as error:
-                print(json.dumps({'event':'stop_not_delivered','reason':str(error)}),flush=True)
+                print(json.dumps({'event':'control_not_confirmed','reason':str(error)}),flush=True)
         if engine is not None:engine.close()
         try:
             if transport is not None:transport.close()

@@ -44,7 +44,7 @@ def save_inputs(folder, observation, raw_frames=None):
 
 
 class CameraVideo:
-    """Remux original JPEG/PNG packets; preserve exact sensor stamps in the sidecar."""
+    """Remux original JPEG packets; preserve exact sensor stamps in the sidecar."""
     def __init__(self,root,key):
         self.root,self.key=Path(root),key
         self.container,self.stream,self.origin,self.last,self.shape,self.format=None,None,None,None,None,None
@@ -54,14 +54,14 @@ class CameraVideo:
     def write(self,source,receipt,payload):
         import av
         with Image.open(BytesIO(payload)) as im:kind,shape=im.format,im.size
-        require(kind in {'JPEG','PNG'},'Camera recording requires JPEG or PNG packets')
+        require(kind=='JPEG','Continuous camera recording requires JPEG packets')
         require(self.last is None or source>self.last,'Camera recording timestamp did not increase')
         if self.container is None:
             self.origin,self.shape,self.format=source,shape,kind
             self.container=av.open(str(self.root/(self.key+'.mkv')),'w',format='matroska')
-            self.stream=self.container.add_stream('mjpeg' if kind=='JPEG' else 'png')
+            self.stream=self.container.add_stream('mjpeg')
             self.stream.width,self.stream.height=shape
-            self.stream.pix_fmt='yuvj420p' if kind=='JPEG' else 'rgb24'
+            self.stream.pix_fmt='yuvj420p'
             self.stream.time_base=Fraction(1,1_000_000_000)
         require(shape==self.shape and kind==self.format,'Camera format or dimensions changed during recording')
         packet=av.Packet(payload);packet.stream=self.stream

@@ -111,7 +111,7 @@ class JointFeedback:
         require(-25_000_000 <= now_ns - self.source_ns <= max_age_ns, "Stale feedback or unsynchronized robot clock")
 
 
-def load_home_yaml(path: Path, profile):
+def load_home_yaml(path: Path, profile, *, validate_targets=True):
     """ROBOTIS files repeat the /** root. Preserve every executor instead of dropping earlier ones."""
     import yaml
 
@@ -146,7 +146,7 @@ def load_home_yaml(path: Path, profile):
         pose = dict(zip(names, map(float, positions)))
         for name, value in pose.items():
             limit = profile["reference_limits"][name]
-            require(math.isfinite(value) and limit["lower"] <= value <= limit["upper"], f"Homing pose outside limits: {name}")
+            require(math.isfinite(value) and (not validate_targets or limit["lower"] <= value <= limit["upper"]), f"Homing pose outside limits: {name}")
         targets[group] = {"positions": pose, "position_tolerance": float(data["position_tolerance"]),
                           "velocity_tolerance": float(data["velocity_tolerance"]),
                           "status_topic": data["action_topic"] + "/_action/status"}
@@ -157,18 +157,34 @@ def load_home_yaml(path: Path, profile):
 
 
 class Startup:
-    def __init__(self, profile, home, started_ns, settle_ns=500_000_000):
+    def __init__(self, profile, home, started_ns, settle_ns=500_000_000, *, require_homing=True):
         self.profile, self.home, self.started_ns, self.settle_ns = profile, home, started_ns, settle_ns
-        self.phase, self.epoch = "initializing", uuid.uuid4().hex
+        self.require_homing = require_homing
+        self.phase, self.epoch = "initializing" if require_homing else "settling", uuid.uuid4().hex
+        self.current_anchor, self.active_homing = None, {}
         self.completed, self.hold = set(), None
         self.goal_starts = {}
         self.stable_since = self.last_feedback_ns = None
 
     def homing_status(self, group, status, goal_started_ns):
         require(group in GROUPS, "Unknown homing group")
+        if not self.require_homing and self.phase == "settling":
+            previous = self.goal_starts.get(group, -1)
+            if goal_started_ns < previous:
+                return
+            self.goal_starts[group] = goal_started_ns
+            if status in (1, 2):
+                self.active_homing[group] = goal_started_ns
+                self.stable_since, self.current_anchor = None, None
+            elif status in (4, 5, 6):
+                if status in (5, 6) and (group in self.active_homing or goal_started_ns >= self.started_ns):
+                    self.phase = "fault"
+                    raise BridgeError(f"Homing failed: {group}")
+                self.active_homing.pop(group, None)
+            return
         if goal_started_ns < self.started_ns:
             return
-        if self.phase in ("ready", "running", "holding"):
+        if self.phase in ("ready", "running", "holding", "paused"):
             if goal_started_ns > self.goal_starts.get(group, -1):
                 # An external homing action now owns the controllers. Do not send a
                 # stop/hold trajectory that would preempt that action.
@@ -201,11 +217,22 @@ class Startup:
         if self.last_feedback_ns == feedback.source_ns:
             return
         self.last_feedback_ns = feedback.source_ns
-        settled = all(abs(feedback.positions[n] - target) <= data["position_tolerance"] and
+        if not self.require_homing:
+            if self.active_homing:
+                self.stable_since, self.current_anchor = None, None
+                return
+            for group in GROUPS:
+                names = self.profile["commands"][group]["joint_names"]
+                check_positions(names, [feedback.positions[n] for n in names], self.profile)
+            if self.current_anchor is None:
+                self.current_anchor = dict(feedback.positions)
+        settled = all(abs(feedback.positions[n] - (target if self.require_homing else self.current_anchor[n])) <= data["position_tolerance"] and
                       abs(feedback.velocities[n]) <= data["velocity_tolerance"]
                       for data in self.home.values() for n, target in data["positions"].items())
         if not settled:
             self.stable_since = None
+            if not self.require_homing:
+                self.current_anchor = dict(feedback.positions)
             return
         if self.stable_since is None:
             self.stable_since = feedback.source_ns
