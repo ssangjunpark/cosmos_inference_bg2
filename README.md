@@ -32,13 +32,15 @@ Model weights, downloaded assets, caches, recorded inputs, and generated outputs
 python3 scripts/cosmos3.py status
 python3 scripts/inspect_checkpoint.py --variant edge --step 20000
 python3 scripts/cosmos3.py build
-python3 scripts/cosmos3.py doctor --gpu 5
+python3 scripts/cosmos3.py doctor --gpu 5 --image base
 ```
 
 Choose an available physical GPU explicitly; the scripts do not claim all GPUs.
 The first image uses the upstream Dockerfile. `docker/Dockerfile.policy` runs the guide's
 `uv sync --all-extras --group=cu130-torch213-train --group=policy-server` command during the
 image build so runtime containers can run offline as your UID. No host Python packages are installed.
+`--image base` selects the unchanged upstream image, verified for this native inference API.
+`--image policy` (the default) selects the additional policy dependency image.
 
 ## RobotEscape checkpoint compatibility
 
@@ -99,7 +101,7 @@ Run inference directly from this recorded observation:
 
 ```bash
 python3 scripts/cosmos3.py infer \
-  --variant edge --step 20000 --gpu 5 \
+  --variant edge --step 20000 --gpu 5 --image base \
   --observation inputs/recorded_observation.npz \
   --tokenizer /path/to/matching/tokenizer-snapshot \
   --vae /path/to/Wan2.2_VAE.pth \
@@ -126,8 +128,9 @@ Successful runs write a fresh `outputs/<variant>-<step>-<timestamp>-<id>/` direc
 
 The decoder checks that generation preserved current-state conditioning, drops row zero, and
 inverts the training affine once. It applies no clipping or gripper remapping. Hardware
-integration remains a separate stage. GPU end-to-end validation is still pending while the
-Docker images finish building; CPU agreement with training data alone is not a model run.
+integration remains a separate stage. Both 20k checkpoints passed recorded-input GPU inference
+in the official base image. Measured first-generation times and artifact paths are recorded
+in the [implementation plan](docs/inference_pipeline_plan.md).
 
 ## Mounts
 

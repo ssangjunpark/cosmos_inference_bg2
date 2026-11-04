@@ -123,7 +123,7 @@ def container(gpu: str, output: Path, dry_run: bool) -> list[str]:
         "--security-opt=no-new-privileges:true", "--shm-size=16g",
         "--tmpfs", "/tmp:rw,nosuid,nodev,size=8g",
         "--user", f"{os.getuid()}:{os.getgid()}", "--workdir", "/workspace",
-        "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HF_HUB_OFFLINE=1",
+        "--env", "USER=cosmos", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "HF_HUB_OFFLINE=1",
         "--env", "TRANSFORMERS_OFFLINE=1", "--env", "HF_HOME=/cache/huggingface",
         "--env", "XDG_CACHE_HOME=/cache/xdg", "--env", "TRITON_CACHE_DIR=/cache/triton",
         "--env", "TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor",
@@ -177,7 +177,7 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError("--adapter-dir must be the directory containing bg2_cosmos")
         command += bind(adapter, "/adapter")
     command += [
-        POLICY_IMAGE, "/app/native_infer.py",
+        BASE_IMAGE if args.image == "base" else POLICY_IMAGE, "/app/native_infer.py",
         "--checkpoint", "/checkpoint", "--observation", "/input/observation.npz",
         "--tokenizer", tokenizer_inside, "--vae", "/assets/Wan2.2_VAE.pth",
         "--output", "/results", "--seed", str(args.seed),
@@ -191,7 +191,8 @@ def run(args: argparse.Namespace) -> None:
 
 def doctor(args: argparse.Namespace) -> None:
     command = container(args.gpu, ROOT / "outputs/doctor", args.dry_run)
-    checked(command + [POLICY_IMAGE, "/app/doctor_runtime.py", "--expected-commit", REVISION], args.dry_run)
+    image = BASE_IMAGE if args.image == "base" else POLICY_IMAGE
+    checked(command + [image, "/app/doctor_runtime.py", "--expected-commit", REVISION], args.dry_run)
 
 
 
@@ -205,12 +206,14 @@ def main() -> int:
     status.add_argument("--sha256", action="store_true", help="Rehash all published shards (reads many GB)")
     health = commands.add_parser("doctor", help="Verify container CUDA and media dependencies")
     health.add_argument("--gpu", required=True)
+    health.add_argument("--image", choices=("base", "policy"), default="policy")
     health.add_argument("--dry-run", action="store_true")
     infer = commands.add_parser("infer", help="Save model outputs for one recorded observation")
     infer.add_argument("--checkpoint-root", type=Path, default=CHECKPOINT_ROOT)
     infer.add_argument("--variant", choices=("edge", "nano"), required=True)
     infer.add_argument("--step", type=int, default=20000)
     infer.add_argument("--gpu", required=True)
+    infer.add_argument("--image", choices=("base", "policy"), default="policy")
     infer.add_argument("--observation", type=Path, required=True)
     infer.add_argument("--tokenizer", type=Path, required=True)
     infer.add_argument("--vae", type=Path, required=True)

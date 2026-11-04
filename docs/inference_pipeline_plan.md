@@ -19,22 +19,23 @@ settings produced it. Repeat that validation for Nano. Physical robot commands a
 - Matching training source is available at `/home/sangjunpark/Documents/robotescape_training_example_20261104`,
   specifically `training/cosmos_futurejoint`. The required six adapter files are vendored with verified hashes.
 - The runner accepts current recorded observations and builds the source-matched native batch.
-  A decoder saves 16-by-8 absolute joint predictions; a real GPU model run remains pending.
+  Both 20k checkpoints have produced finite 16-by-8 absolute joint predictions on the same recorded observation.
 
 ## Implementation order
 
 | Step | Remaining work | Completion evidence |
 | --- | --- | --- |
-| 1 | Finish the Docker environment and run the runtime check. | Base and policy images build; verified image provenance, CUDA arithmetic, and real video decoding pass inside the container. |
-| 2 | **Source review and integration complete.** Validate its native runtime in Docker. | The saved `bg2_cosmos.model.BG2PolicyModel` imports; its inference behavior, custom embodiment ID, and data schema are established from source. |
-| 3 | **Implemented; CPU reference checks passed.** Verify native tokenization and packing in Docker. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
-| 4 | **Implemented; CPU decoding checks passed.** Verify on generated outputs. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
-| 5 | Run Edge and Nano end to end. | Both 20k checkpoints produce real saved predictions for recorded inputs; input/checkpoint identity and sampling parameters are recorded. |
+| 1 | **Official base image built and checked.** Finish/check the policy dependency overlay. | Base and policy images build; verified image provenance, CUDA arithmetic, and real video decoding pass inside the container. |
+| 2 | **Complete.** Source verified and native class loaded in Docker. | The saved `bg2_cosmos.model.BG2PolicyModel` imports; its inference behavior, custom embodiment ID, and data schema are established from source. |
+| 3 | **Complete.** CPU reference and native Edge/Nano tokenization/batch checks passed. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
+| 4 | **Complete.** CPU inverse checks and both generated-output decodes passed. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
+| 5 | **Complete in the official base image.** Both 20k recorded-input runs passed. | Both 20k checkpoints produce real saved predictions for recorded inputs; input/checkpoint identity and sampling parameters are recorded. |
 | 6 | Measure runtime and add a persistent inference worker. | Separate loading, preprocessing, generation, and decoding timings; record GPU memory; reuse the loaded model between requests. |
 | 7 | Connect the later hardware bridge. | Use verified predictions with the homing/hold coordinator, fresh robot observations, explicit command ownership, and tested trajectory timing. |
 
-The matching source has been found and integrated. Steps 2–4 no longer depend on receiving
-training code; the remaining checks require the completed Docker environment and real model outputs.
+The matching source has been found and integrated. Steps 2–5 passed using NVIDIA's official
+base image. The guide's additional policy dependency image is still exporting; its changed
+PyTorch/media environment needs a separate runtime check.
 
 ## Immediate environment fix
 
@@ -47,8 +48,9 @@ and passes the complete metadata with strict provenance enabled. A regression te
 wrapper's arguments through NVIDIA's actual validator. The policy image also regenerates
 runtime provenance after installing its documented dependency group.
 
-A corrected build is being retried. Successful builds and GPU runtime verification are
-still required; passing the CPU regression check alone does not establish a working image.
+The corrected base build passed verified provenance, CUDA arithmetic, and actual TorchCodec
+video decoding on the selected GPU. Both native inference runs also passed in that image.
+The additional policy dependency overlay is exporting and still needs runtime verification.
 
 ## Matching training source and completed integration
 
@@ -74,7 +76,29 @@ local decoder removes the conditioned row and applies the training inverse affin
 Twenty CPU tests pass, including exact pixel/current-state comparisons against the actual
 training loader at the first, middle, and tail example frames, decoder recovery of recorded
 targets, rejection of future labels, and input/joint-order validation. These checks establish
-input/decoder agreement; GPU tokenization, model loading, and generation still need validation.
+input/decoder agreement. Native tokenization, model loading, generation, and output decoding
+have also passed for both variants in the official base image.
+
+## Recorded GPU results (2026-11-04)
+
+NVIDIA's unchanged base image, PyTorch 2.10.0+cu130, RTX PRO 6000 Blackwell GPU 5.
+Input: `inputs/recorded_observation.npz`, episode `4_0`, frame zero. Seed 0,
+4 sampling steps, guidance 3.0, shift 5.0; Edge guidance interval [960,1001], Nano unrestricted.
+These settings follow the upstream service defaults; they are not a tuned BG2 quality benchmark.
+
+| Variant / step | Load (s) | First generation (s) | Peak allocated GPU (GiB) | Saved physical predictions |
+| --- | ---: | ---: | ---: | --- |
+| Edge / 20000 | 15.44 | 2.99 | 8.02 | `outputs/edge-020000-20261104T072321Z-3d5f49a3/joint_positions.npy` |
+| Nano / 20000 | 57.95 | 1.57 | 30.02 | `outputs/nano-020000-20261104T072501Z-2e9bec53/joint_positions.npy` |
+
+Both results are finite float32 arrays of shape [16,8], with preserved current-state conditioning
+and JSON joint names, recorded radian units, and forecast offsets 50–800 ms. Request files
+record observation/checkpoint identity and complete sampling settings. Logs are under
+`.runtime/logs/`. Outputs and logs remain local and ignored by Git.
+
+Generation timings are first requests and include native vision preparation; they do not establish
+steady-state throughput. Next implement a persistent worker and measure warmed requests against
+the 0.8-second prediction horizon before choosing a hardware execution cadence.
 
 ## Validation boundaries
 

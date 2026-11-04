@@ -78,6 +78,8 @@ def main() -> None:
         raise ValueError("Output directory must be empty to preserve earlier results")
     runtime = {
         "framework_commit": contract["framework_commit"],
+        "image_provenance": json.loads(Path("/opt/cosmos/image-provenance.json").read_text()),
+        "torch_version": torch.__version__, "gpu": torch.cuda.get_device_name(),
         "model_target": target, "seed": args.seed, "steps": args.steps,
         "guidance": args.guidance, "guidance_interval": args.guidance_interval, "shift": args.shift,
         "checkpoint": str(args.checkpoint), "observation": str(args.observation),

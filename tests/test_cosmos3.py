@@ -101,6 +101,7 @@ class ContainerTests(unittest.TestCase):
         self.assertIn("--network=none", command)
         self.assertIn("--read-only", command)
         self.assertIn("--user", command)
+        self.assertIn("USER=cosmos", command)
         self.assertNotIn("--privileged", command)
         self.assertNotIn("--net=host", command)
         self.assertNotIn("-p", command)
