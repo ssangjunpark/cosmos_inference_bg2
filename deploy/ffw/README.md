@@ -9,10 +9,10 @@ IK implementation, motor driver, or replacement for the existing 100 Hz controll
 From the cosmos_inference_bg2 repository:
 
 ```bash
-python3 scripts/package_ffw.py --output outputs/ffw_bundle
+python3 scripts/package_ffw.py --output transfer/ffw
 ```
 
-Send the generated `outputs/ffw_bundle/` folder when deployment is requested.
+Send the generated `transfer/ffw/` folder when deployment is requested.
 `deploy/ffw/` is the source template; the packager adds shared core modules, a
 reference robot profile, and a SHA-256 manifest. Use a new output directory for later
 versions. The packager never connects to either remote machine.

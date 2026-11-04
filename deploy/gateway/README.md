@@ -9,7 +9,7 @@ JointTrajectory publishers, controller clients, IK, or low-level control loop.
 Prepare the standalone folder on PRO 6000:
 
 ```bash
-python3 scripts/package_gateway.py --output outputs/gateway_bundle
+python3 scripts/package_gateway.py --output transfer/5090
 ```
 
 The builder copies only the required local scripts, pinned SDK package and license,

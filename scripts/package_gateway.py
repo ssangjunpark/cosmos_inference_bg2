@@ -53,6 +53,6 @@ def build(output):
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output",type=Path,default=ROOT/"outputs/gateway_bundle")
+    parser.add_argument("--output",type=Path,default=ROOT/"transfer/5090")
     args=parser.parse_args();result=build(args.output)
     print(json.dumps({"folder":str(args.output),"files":len(result["files"]),"bytes":sum(v["bytes"] for v in result["files"].values()),"transferred":False}))

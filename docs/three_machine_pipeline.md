@@ -65,8 +65,8 @@ outputs and measuring latency; old predictions are not suitable for live executi
 ## Prepare the two small deployment folders here
 
 ```bash
-python3 scripts/package_gateway.py --output outputs/gateway_bundle
-python3 scripts/package_ffw.py --output outputs/ffw_bundle
+python3 scripts/package_gateway.py --output transfer/5090
+python3 scripts/package_ffw.py --output transfer/ffw
 ```
 
 Both folders are standalone and have checksum manifests. No command transfers files.

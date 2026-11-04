@@ -174,12 +174,24 @@ first, middle, and tail samples against its actual loader. Set `BG2_TRAINING_BUN
 bundle is elsewhere; this reference check is skipped when the bundle is absent. GPU inference
 additionally needs the completed Docker image and matching assets.
 
+## Source and transfer folders
+
+| Folder | Purpose | Git |
+| --- | --- | --- |
+| `scripts/` | Shared implementation, inference service and packaging tools. Edit here. | Tracked |
+| `deploy/ffw/` and `deploy/gateway/` | Machine-specific source code, launch settings and deployment instructions. Edit here. | Tracked |
+| `transfer/ffw/` and `transfer/5090/` | Generated standalone copies to send to the named machine. | Ignored; regenerate from source |
+| `outputs/` | Local inference results and measurements. | Ignored |
+
+See [transfer instructions](transfer/README.md). The generated folders include required
+shared modules so you can copy one complete folder without the rest of the repository.
+
 ## Portable FFW companion
 
 Prepare a small, self-contained folder on the PRO 6000 server for later SFTP:
 
 ```bash
-python3 scripts/package_ffw.py --output outputs/ffw_bundle
+python3 scripts/package_ffw.py --output transfer/ffw
 ```
 
 This command never transfers files or contacts either remote machine. The bundle contains
@@ -195,7 +207,7 @@ overlap execution; starvation produces a local hold. The persistent server and a
 The matching gateway folder is prepared with:
 
 ```bash
-python3 scripts/package_gateway.py --output outputs/gateway_bundle
+python3 scripts/package_gateway.py --output transfer/5090
 ```
 
 Warm local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano

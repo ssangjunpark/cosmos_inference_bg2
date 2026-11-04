@@ -64,8 +64,16 @@ transport are legacy co-located drafts. They are not the deployment path for thi
 The user requested minimal changes and reuse of existing software. The FFW launcher
 now uses the installed image directly instead of building a derived image. The 39
 affected FFW tests pass and Docker Compose configuration validation passes locally.
-The refreshed generated FFW folder contains the code and Compose file for later copy;
+The refreshed generated `transfer/ffw/` folder contains the code and Compose file for later copy;
 no remote machine was contacted or modified. The 5090 setup is unchanged.
+
+## Transfer-folder layout
+
+Ready-to-copy folders now live in `transfer/ffw/` and `transfer/5090/`, not `outputs/`.
+They are generated and ignored by Git; tracked source remains under `deploy/`, `scripts/`
+and the pinned SDK submodule. `transfer/README.md` explains edit versus copy locations.
+Both package scripts default to the new paths. Previous generated bundles are preserved
+under `.runtime/bundle_archive/`; inference outputs remain under `outputs/`.
 
 ## Remaining physical work
 
