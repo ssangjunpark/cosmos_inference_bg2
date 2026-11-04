@@ -27,8 +27,12 @@ Use the [three-machine runbook](three_machine_pipeline.md) for commands and topo
   validated timed chunks to existing controllers, tracking/expiry/stop behavior.
 - `scripts/package_gateway.py` and `scripts/package_ffw.py`: small standalone whitelist
   bundles with checksums/source commit. No SSH or transfer; refuse existing output paths.
-- `deploy/gateway` and `deploy/ffw`: Compose/Docker templates, preview defaults, read-only
-  roots/config/secrets, no GPU/serial/socket access. Existing ROBOTIS bringup stays separate.
+- `deploy/gateway`: gateway Docker/Compose templates with pinned dependencies.
+- `deploy/ffw`: reuse the installed `robotis/ai-worker:2.2.8` image in a separate
+  companion container, mounting code/launcher/profile/home YAML read-only. No FFW
+  Dockerfile, image build, package install, or automatic pull. Override the inherited
+  s6 entrypoint and API healthcheck so only the companion starts. Preview remains default;
+  no GPU/serial/socket access. Existing ROBOTIS bringup stays separate.
 
 The older `robotis_bridge.py`, `cosmos_worker.py`, Unix IPC and direct 5090 trajectory
 transport are legacy co-located drafts. They are not the deployment path for this topology.
@@ -54,6 +58,14 @@ transport are legacy co-located drafts. They are not the deployment path for thi
   homing, ownership, stale feedback/status, model concurrency, and authentication.
 - Local test model containers were stopped after measurements; no model server is left
   running as an unintended deployment.
+
+## Minimal FFW runtime revision
+
+The user requested minimal changes and reuse of existing software. The FFW launcher
+now uses the installed image directly instead of building a derived image. The 39
+affected FFW tests pass and Docker Compose configuration validation passes locally.
+The refreshed generated FFW folder contains the code and Compose file for later copy;
+no remote machine was contacted or modified. The 5090 setup is unchanged.
 
 ## Remaining physical work
 

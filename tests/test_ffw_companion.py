@@ -296,6 +296,8 @@ class BundleTests(unittest.TestCase):
             manifest = build(out)
             self.assertLess(sum(v['bytes'] for v in manifest['files'].values()), 200_000)
             self.assertFalse(json.loads((out/'config/profile.reference.json').read_text())['execution_enabled'])
+            self.assertFalse(manifest['image_build_required'])
+            self.assertFalse((out/'Dockerfile').exists())
             for name, record in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((out/name).read_bytes()).hexdigest(), record['sha256'])
             result = subprocess.run([sys.executable,'-B','-m','cosmos_ffw.node','--profile',str(out/'config/profile.reference.json'),
@@ -304,14 +306,24 @@ class BundleTests(unittest.TestCase):
             self.assertFalse(json.loads(result.stdout)['robot_connection_opened'])
             with self.assertRaises(ValueError):build(out)
 
-    def test_compose_has_no_devices_and_defaults_to_preview(self):
+    def test_compose_reuses_installed_image_and_mounts_code_read_only_without_bringup(self):
         import yaml
         config = yaml.safe_load((ROOT/'deploy/ffw/compose.yaml').read_text())['services']['companion']
         self.assertNotIn('devices',config)
         self.assertNotIn('privileged',config)
         self.assertTrue(config['read_only'])
         self.assertIn('${COSMOS_MODE:-preview}',config['command'])
-        self.assertTrue(all(value.endswith(':ro') for value in config['volumes']))
+        self.assertNotIn('build',config)
+        self.assertEqual(config['image'],'${ROBOTIS_IMAGE:-robotis/ai-worker:2.2.8}')
+        self.assertEqual(config['pull_policy'],'never')
+        self.assertEqual(config['entrypoint'],['/bin/bash','/opt/cosmos_ffw/run.sh'])
+        self.assertTrue(config['healthcheck']['disable'])
+        mounts={value['target']:value for value in config['volumes']}
+        self.assertEqual(mounts['/opt/cosmos_ffw/cosmos_ffw']['source'],'./cosmos_ffw')
+        self.assertEqual(mounts['/opt/cosmos_ffw/run.sh']['source'],'./run.sh')
+        for mount in mounts.values():
+            self.assertTrue(mount['read_only'])
+            self.assertFalse(mount['bind']['create_host_path'])
 
 
 class NodeWiringTests(unittest.TestCase):

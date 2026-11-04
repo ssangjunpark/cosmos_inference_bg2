@@ -112,13 +112,45 @@ python3 -B -m cosmos_ffw.node \
   --check
 ```
 
-For a later ROS-container test, `docker compose build` uses the installed
-`robotis/ai-worker:2.2.8` image and copies only this companion code. Its entrypoint
-starts only the companion, not the inherited s6 robot bringup. The default compose
-command is preview. It mounts the chosen existing home YAML and profile read-only,
-uses the existing local Zenoh router, and has no serial devices, Docker socket, GPU,
-or privileged access. Logs and runtime caches are restricted to a temporary filesystem.
-It leaves existing ROBOTIS containers and their launch arguments unchanged.
+For later deployment, reuse the **already installed** `robotis/ai-worker:2.2.8`
+image. There is no image build, package installation, or ROS/driver replacement.
+The companion runs in a separate small container from that same image; the existing
+`ai_worker` container and its bringup are not entered, edited, or restarted.
+
+The image is the installed software environment. The companion container is just a
+separate running process using that environment. Its entrypoint explicitly starts
+our Python companion instead of the image's normal s6/robot-bringup entrypoint.
+The inherited management-API healthcheck is disabled because that API is not started.
+Image pulling is disabled; a missing local image fails instead of downloading another
+version. A later deployment may set ROBOTIS_IMAGE to the verified installed image ID.
+
+From the **generated bundle** on FFW, after filling `.env` from `.env.example` and
+selecting the actual profile/home YAML, check the files without opening ROS:
+
+```bash
+docker compose run --rm companion \
+  --profile /config/profile.json \
+  --initial-positions /config/initial_positions.yaml \
+  --check
+```
+
+Then start preview in the foreground:
+
+```bash
+docker compose up --no-build --pull never
+```
+
+No `docker compose build` or pip command is needed on FFW. All code, the launcher,
+profile and chosen home YAML are mounted read-only. Missing source paths fail instead
+of creating directories on the host. The root filesystem is read-only; temporary
+logs/caches use `/tmp`. The companion uses the existing local Zenoh router and has no
+serial devices, Docker socket, GPU, or privileged access. Default mode is preview.
+Stopping this Compose service affects only the companion, leaving existing ROBOTIS
+services running; physical stop limitations below still apply.
+
+The local tests validate bundle portability, launch isolation and companion behavior.
+The installed ARM64 image has not been run with this companion on FFW yet; live runtime
+compatibility and controller/camera behavior remain commissioning work.
 
 `.env.example` lists the later deployment settings. Set FFW_INITIAL_POSITIONS to the
 same file selected by ROBOTIS init_position_file; changing that file should require

@@ -16,7 +16,7 @@ def build(output):
         raise ValueError("Use a new output directory; earlier bundles are preserved")
     output.mkdir(parents=True)
     template = ROOT / "deploy/ffw"
-    names = ("Dockerfile", "compose.yaml", "run.sh", ".env.example", ".dockerignore", "README.md",
+    names = ("compose.yaml", "run.sh", ".env.example", "README.md",
              "verify_bundle.py", "cosmos_ffw/__init__.py", "cosmos_ffw/node.py", "cosmos_ffw/ros_messages.py")
     sources = [template / name for name in names]
     for source in sources:
@@ -35,7 +35,8 @@ def build(output):
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
     manifest = {"schema": 1, "purpose": "FFW Cosmos companion; offline prepared, not live commissioned",
                 "source_commit": commit, "source_dirty": dirty, "default_mode": "preview",
-                "expected_robotis_image": "robotis/ai-worker:2.2.8", "files": files}
+                "expected_robotis_image": "robotis/ai-worker:2.2.8",
+                "runtime": "installed_robotis_image_with_read_only_code", "image_build_required": False, "files": files}
     (output / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 

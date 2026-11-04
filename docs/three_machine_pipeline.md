@@ -70,8 +70,9 @@ python3 scripts/package_ffw.py --output outputs/ffw_bundle
 ```
 
 Both folders are standalone and have checksum manifests. No command transfers files.
-The gateway includes the pinned SDK and five licensed message definitions; FFW reuses
-its installed `robotis/ai-worker:2.2.8` ROS image. Keep the model, weights, tokenizer,
+The gateway includes the pinned SDK and five licensed message definitions; FFW runs a separate companion using
+its installed `robotis/ai-worker:2.2.8` ROS image with read-only code mounts; no FFW image
+build or package installation is needed. Keep the model, weights, tokenizer,
 VAE, recordings, and all large framework images on PRO 6000. Each generated folder's
 README and `.env.example` describe its settings. Preserve the default preview mode.
 
@@ -91,7 +92,9 @@ performed. The SSH destination for PRO 6000 is still an operator-supplied value.
    ```
 
 3. On FFW, set FFW_INITIAL_POSITIONS to the actual YAML selected by ROBOTIS bringup,
-   then `docker compose build` and `docker compose up` from its bundle. Default is
+   then `docker compose up --no-build --pull never` from its generated bundle. It
+   reuses the installed image in a separate companion container, with read-only code
+   and configuration; no image build, install, or restart of `ai_worker`. Default is
    preview. Start this companion before the externally managed homing sequence so
    it can witness fresh success for all four homing actions. It never starts homing.
 4. On 5090, create `logs/`, configure `.env` with your UID/GID, instruction, profile,

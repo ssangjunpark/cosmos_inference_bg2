@@ -183,8 +183,10 @@ python3 scripts/package_ffw.py --output outputs/ffw_bundle
 ```
 
 This command never transfers files or contacts either remote machine. The bundle contains
-a native ROS 2 companion, Docker/Compose files, a reference profile, and file checksums.
-It defaults to preview and leaves existing ROBOTIS bringup/driver containers alone.
+a native ROS 2 companion, a Compose launcher, a reference profile, and file checksums.
+It defaults to preview and reuses the already-installed ROBOTIS image with the companion
+code mounted read-only. No image build or package installation is needed on FFW, and
+existing ROBOTIS bringup/driver containers stay unchanged.
 
 Read [FFW bundle documentation](deploy/ffw/README.md) for the chunk wire protocol and
 request/execution lifecycle. The 5090 forwards complete timestamped chunks; FFW validates
