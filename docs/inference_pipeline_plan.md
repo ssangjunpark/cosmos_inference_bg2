@@ -25,17 +25,17 @@ settings produced it. Repeat that validation for Nano. Physical robot commands a
 
 | Step | Remaining work | Completion evidence |
 | --- | --- | --- |
-| 1 | **Official base image built and checked.** Finish/check the policy dependency overlay. | Base and policy images build; verified image provenance, CUDA arithmetic, and real video decoding pass inside the container. |
+| 1 | **Official base image built and checked.** Policy dependency overlay built; native inference uses the verified base image. | Base and policy images build; verified image provenance, CUDA arithmetic, and real video decoding pass inside the container. |
 | 2 | **Complete.** Source verified and native class loaded in Docker. | The saved `bg2_cosmos.model.BG2PolicyModel` imports; its inference behavior, custom embodiment ID, and data schema are established from source. |
 | 3 | **Complete.** CPU reference and native Edge/Nano tokenization/batch checks passed. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
 | 4 | **Complete.** CPU inverse checks and both generated-output decodes passed. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
 | 5 | **Complete in the official base image.** Both 20k recorded-input runs passed. | Both 20k checkpoints produce real saved predictions for recorded inputs; input/checkpoint identity and sampling parameters are recorded. |
-| 6 | Measure runtime and add a persistent inference worker. | Separate loading, preprocessing, generation, and decoding timings; record GPU memory; reuse the loaded model between requests. |
-| 7 | Connect the later hardware bridge. | Use verified predictions with the homing/hold coordinator, fresh robot observations, explicit command ownership, and tested trajectory timing. |
+| 6 | **Complete.** Persistent authenticated HTTP service, one warmed model and GPU thread. | Both real Edge/Nano services passed five local HTTP requests; warm latency is recorded in the three-machine runbook. |
+| 7 | **Software complete locally; physical commissioning remains.** 5090 gateway and portable FFW companion. | Local raw-observation → HTTP → gateway → FFW executor tests pass. Actual recorded Edge reply passes FFW validation; no remote deployment or actuation. |
 
 The matching source has been found and integrated. Steps 2–5 passed using NVIDIA's official
-base image. The guide's additional policy dependency image is still exporting; its changed
-PyTorch/media environment needs a separate runtime check.
+base image. The guide's additional policy dependency image has built; native inference and
+serving measurements below use the verified official base image.
 
 ## Immediate environment fix
 
@@ -50,7 +50,8 @@ runtime provenance after installing its documented dependency group.
 
 The corrected base build passed verified provenance, CUDA arithmetic, and actual TorchCodec
 video decoding on the selected GPU. Both native inference runs also passed in that image.
-The additional policy dependency overlay is exporting and still needs runtime verification.
+The additional policy dependency overlay has built. Native model inference and serving are
+verified in the official base image; the overlay is not required for this custom DCP API.
 
 ## Matching training source and completed integration
 
@@ -96,9 +97,13 @@ and JSON joint names, recorded radian units, and forecast offsets 50–800 ms. R
 record observation/checkpoint identity and complete sampling settings. Logs are under
 `.runtime/logs/`. Outputs and logs remain local and ignored by Git.
 
-Generation timings are first requests and include native vision preparation; they do not establish
-steady-state throughput. Next implement a persistent worker and measure warmed requests against
-the 0.8-second prediction horizon before choosing a hardware execution cadence.
+Generation timings above are first requests and include native vision preparation. The persistent
+HTTP service is now implemented and warms before accepting requests. Warm five-request local
+HTTP results were Edge 0.231 s median / 0.293 s max and Nano 0.401 s median / 0.440 s max.
+The [three-machine runbook](three_machine_pipeline.md) records full serving commands, chunk
+timing, deployment boundaries, and remaining physical checks. Actual recorded Edge output
+passed the FFW bounds/velocity gate; Nano was rejected for a negative gripper target.
+Both model outputs remain unchanged and no robot commands have been published.
 
 ## Validation boundaries
 

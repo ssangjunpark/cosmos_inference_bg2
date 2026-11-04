@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!requirements.lock
+!scripts/
+!scripts/**
+!messages/
+!messages/**
+!third_party/
+!third_party/zenoh_ros2_sdk/
+!third_party/zenoh_ros2_sdk/**
+**/__pycache__/
+**/*.pyc

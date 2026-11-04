@@ -1,102 +1,68 @@
 # Bridge implementation handoff
 
-The user subsequently resumed work to prepare a local FFW folder for later SFTP.
-Both remote machines must remain unchanged; no transfer is authorized yet.
+Updated 2026-11-04 after the user resumed full local implementation. The three-role
+software is implemented; physical deployment and commissioning have not been performed.
+Use the [three-machine runbook](three_machine_pipeline.md) for commands and topology.
 
 ## Constraints
 
-- All implementation belongs in this local cosmos_inference_bg2 repository.
-- 3sp5090 is read-only. No remote edits, installs, container operations that change state,
-  homing, or motion commands. This implementation turn made no remote connections.
-- Commit major milestones locally; do not push. Keep weights, recordings, and generated
-  outputs outside Git. Preserve pinned upstream submodules.
-- Use matching cosmos_futurejoint training source and verified output decoding. Ask for
-  missing hardware information instead of assuming camera rotations or controller details.
+- All code is in the local cosmos_inference_bg2 repository on PRO 6000.
+- 3sp5090 and FFW remain strictly read-only. This implementation made no remote connections,
+  transfers, installs, container changes, homing calls, or motion commands.
+- Commit major milestones locally; never push without a new explicit instruction.
+- Keep weights, assets, observations, generated bundles, logs, caches, and token files ignored.
+  Upstream Framework, ai_worker, and Zenoh SDK remain pinned and unchanged.
+- Do not guess camera transforms or enabled hardware configuration.
 
-## Completed before this work
+## Implemented entry points
 
-- Recorded-observation Edge/Nano step-20000 inference passed in the official NVIDIA base image.
-- Twenty CPU tests passed before bridge implementation.
-- ROBOTIS dependencies and the read-only inspection profile were committed as 46ee6eb.
-- The reference profile deliberately has execution disabled and unknown live camera transforms.
+- `scripts/cosmos3.py serve`: protected Docker launch, localhost HTTP port, private token,
+  verified DCP/assets, recorded-input warmup. `scripts/inference_server.py` uses one persistent
+  model on one GPU thread with authenticated bounded requests and no request queue.
+- `scripts/gateway.py`: inspect, replay, preview, execute. Align three views and measured
+  joints, use original FFW timestamps and local monotonic elapsed times, one async request,
+  discard stale/old-epoch replies, prefetch during execution, forward chunks only.
+- `deploy/ffw/cosmos_ffw/node.py`: native ROS companion. Fresh homing success for all groups,
+  settling, one post-homing hold snapshot, controller/position-interface/ownership gates,
+  validated timed chunks to existing controllers, tracking/expiry/stop behavior.
+- `scripts/package_gateway.py` and `scripts/package_ffw.py`: small standalone whitelist
+  bundles with checksums/source commit. No SSH or transfer; refuse existing output paths.
+- `deploy/gateway` and `deploy/ffw`: Compose/Docker templates, preview defaults, read-only
+  roots/config/secrets, no GPU/serial/socket access. Existing ROBOTIS bringup stays separate.
 
-## Draft code saved at pause (not tested)
+The older `robotis_bridge.py`, `cosmos_worker.py`, Unix IPC and direct 5090 trajectory
+transport are legacy co-located drafts. They are not the deployment path for this topology.
 
-- scripts/bg2_bridge/core.py: profile/feedback validation, duplicate-root ROBOTIS homing YAML
-  parsing, startup/settling/hold capture, timestamp-preserving trajectories and hold messages.
-- scripts/bg2_bridge/observations.py: three-camera buffering, 25 ms alignment, explicit camera
-  orientation/dimension checks, original PIL crop/resize and head letterboxing.
-- scripts/bg2_bridge/ipc.py: same-user Unix socket JSON requests and pickle-free NPZ handoff.
-- scripts/bg2_bridge/transport.py: pinned Zenoh SDK subscriptions, explicit publisher activation,
-  controller-manager and competing-publisher checks, ROS trajectory conversion.
-- scripts/policy_runtime.py: reusable native policy object that loads the model once.
-- scripts/cosmos_worker.py: persistent Unix socket model worker.
-- scripts/robotis_bridge.py: draft observe/preview/execute/offline-replay CLI and watchdog loop.
+## Validation evidence
 
-This is a work-in-progress checkpoint, not a verified or deployment-ready bridge.
-No bridge process or hardware publisher was run. No bridge tests were run.
+- 82 CPU tests: 81 pass and the optional SDK test skips in the default host environment.
+  The SDK test passes separately in the isolated gateway environment.
+- Real SDK pub/sub passed on loopback with bundled schemas and runtime downloads forbidden,
+  also inside the built read-only, network-disabled Python 3.12 gateway container.
+- Existing local native Jazzy CDR trajectory serialization checks passed.
+- Real step-20000 Edge and Nano warmed services each processed five authenticated HTTP
+  recorded-input requests, returning finite 16×8 absolute radian positions. Original
+  observation timestamps are preserved. Median/max: Edge 0.231/0.293 s, Nano 0.401/0.440 s.
+- Actual Edge reply passes the FFW trajectory validator at worst observed local latency
+  with nine future points. Nano includes a -0.0081 rad gripper value and is correctly
+  rejected against reference limits. No model-output clipping or silent coordinate change.
+- Synthetic three-camera/joint observations traverse the actual HTTP service, asynchronous
+  gateway, and FFW chunk executor. Negative cases cover clocks, expiry, old epochs,
+  homing, ownership, stale feedback/status, model concurrency, and authentication.
+- Local test model containers were stopped after measurements; no model server is left
+  running as an unintended deployment.
 
-## Resume next
+## Remaining physical work
 
-1. Review the draft and fix known issues before running it:
-   - transport.check_ownership currently invalidates its previous good lease while a new
-     check is in progress; retain the valid lease until the check completes or fails.
-   - Invalidate/fault an active session if new homing starts after capture; current
-     Startup.homing_status ignores statuses once ready/running.
-   - Review resource cleanup on startup failures, ownership loss, shutdown, stale feedback,
-     and partially sent bundles; document controller-side stop limitations honestly.
-   - Check native message types/serialization against the pinned SDK using local mocks
-     and real CDR serialization, without a robot connection.
-2. Wire a cosmos3.py worker command with the existing container isolation and a narrowly
-   scoped writable IPC directory. Do not expose robot networking/devices to the GPU worker.
-3. Decide whether to share NativePolicy with the existing one-shot runner to avoid duplicated
-   loading/generation code. Preserve CLI/config relocation compatibility and saved outputs.
-4. Add meaningful tests for camera pixels/timestamps, all homing groups and custom YAML,
-   immutable session holds, invalid/expired trajectories, velocity/position limits,
-   default preview creating no publishers, ownership failures, worker protocol, and cleanup.
-5. Run CPU tests and an entirely offline replay. Then validate the persistent worker locally
-   with a free explicitly selected GPU and recorded observations; measure warmed latency.
-6. Update README and hardware plan to distinguish implemented, tested, and live-unverified
-   behavior. Commit a tested milestone locally. Never deploy or actuate on 3sp5090.
+1. Verify raw camera dimensions, orientation and field of view against training preparation.
+2. Confirm actual home YAML, installed 2.2.8 controller interfaces/limits and exclusive
+   ownership. The earlier inspection found no active robot services. The reference profile
+   stays disabled; alternate head target 0.78 violates the reference 0.6951 limit.
+3. Supply the PRO 6000 SSH destination from 5090, transfer the reviewed small bundles/token
+   only when authorized, and measure real network timing and sustained jitter.
+4. Start preview companion before fresh ROBOTIS homing, exercise end-to-end chunk acceptance,
+   then commission supervised execute mode, tracking, shutdown and starvation behavior.
 
-## Live prerequisites still unknown
-
-Raw image dimensions and orientation matching the training MP4 pipeline; installed onboard
-bringup/limits, actual selected homing YAML, active controllers and command ownership;
-router/live observation availability; warmed runtime compatible with the 0.8 s forecast.
-The reference profile must remain non-executable until real compatibility is established.
-
-## Later clarification and FFW inspection
-
-The user clarified that PRO 6000 runs inference, the 5090 is the communication gateway,
-and FFW owns robot control/sensors. The local Unix-socket draft needs a network transport
-for PRO 6000 ↔ 5090. Coding remains paused; only remote inspection was subsequently
-authorized. Both the 5090 and FFW must remain read-only.
-
-Read [FFW inspection results](ffw_read_only_inspection_20261104.md) before resuming.
-In particular, use the actual installed source revision, distinguish installed containers
-from inactive robot services, and do not feed eight-joint Cosmos output into the existing
-10-value end-effector adapter. Existing robot-side controller functionality should be reused.
-
-## Local FFW bundle milestone (2026-11-04)
-
-Implemented the robot-side companion in `deploy/ffw`, sharing the startup/trajectory
-core through the whitelist-only `scripts/package_ffw.py` builder. Generated payloads
-under `outputs/` are standalone and contain no model, SDK checkout, driver, or weights.
-
-- Whole timed chunks go to existing FFW JointTrajectoryControllers, which interpolate
-  them. No second 100 Hz motor loop or EE10 IK layer is added on the 5090.
-- Added transactional chunk replacement, session/request checks, original forecast
-  timestamps, expiration holds, feedback/ownership/health checks, and preview mode.
-- Fixed the earlier ownership refresh lease issue and invalidated sessions on external
-  rehoming; old holds cannot preempt the new homing action.
-- Added a tested RequestPlanner for asynchronous prefetch. The actual 5090/server
-  network request path is still unfinished; Unix sockets do not span these hosts.
-- Local tests cover core lifecycle, ROS-node wiring through mocks, and bundle portability.
-  Native ROS 2 Jazzy CDR trajectory serialization was also checked without ROS initialization.
-- No remote machine was contacted or modified during this bundle implementation.
-
-Next: finish the 5090 gateway and PRO network RPC, validate raw camera transforms,
-measure warmed end-to-end latency, then commission the companion with the actual
-installed controllers/profile. Current first-call inference timings do not fit 0.8 s.
-The old co-located `robotis_bridge.py` execute path remains a legacy draft for this topology.
+The user has not authorized transfer or modifying either remote machine. Do not interpret
+local software completion as live hardware verification. Edge is the initial deployment
+example; Nano timing and the observed gripper-limit rejection need evaluation before motion.

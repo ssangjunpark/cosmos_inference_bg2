@@ -1,0 +1,2 @@
+# Preserve unmodified upstream ROS message files, including their existing whitespace.
+deploy/gateway/messages/**/*.msg -whitespace

@@ -443,6 +443,19 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIsNone(node.startup.hold)
         self.assertEqual(node.command_count,before)
 
+    def test_shutdown_announces_a_valid_stopped_epoch_without_preview_commands(self):
+        import re
+        node=self.make_ready(self.node('preview'))
+        previous=node.startup.epoch
+        node.shutdown_hold()
+        status=json.loads(node.status_pub.sent[-1].data)
+        self.assertEqual(status['phase'],'stopped')
+        self.assertNotEqual(status['epoch'],previous)
+        self.assertTrue(re.fullmatch(r'[0-9a-f]{32}',status['epoch']))
+        self.assertEqual(node.command_count,0)
+        before=len(node.status_pub.sent);node.shutdown_hold()
+        self.assertEqual(len(node.status_pub.sent),before)
+
     def test_stale_lease_and_stale_feedback_cannot_submit_a_chunk(self):
         import time
         from types import SimpleNamespace as NS

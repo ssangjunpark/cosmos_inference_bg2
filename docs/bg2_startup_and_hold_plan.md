@@ -71,11 +71,12 @@ position and velocity tolerances. The startup supervisor must wait for actual co
 
 ## Runtime behavior
 
-Keep a persistent GPU inference worker and a separate ROS 2 communication bridge. The bridge
-collects robot feedback and camera observations, passes model inputs to the worker, validates
-the returned predictions, and sends right-arm trajectories to the existing controller.
-The bridge can use the deployed ROS middleware directly; choose any Zenoh transport only
-after confirming the robot's actual setup. Model-to-bridge communication can use local IPC.
+Keep a persistent GPU inference worker and a separate ROS 2 communication bridge. The 5090 gateway
+collects feedback and cameras using the installed-stack-matched Zenoh SDK, sends prepared
+observations over an authenticated SSH-tunneled HTTP connection to PRO 6000, and forwards
+whole timestamped chunks. The FFW companion validates and sends right-arm trajectories
+to existing controllers. The [implemented three-machine runbook](three_machine_pipeline.md)
+replaces the earlier co-located local-IPC proposal. All code remains local until deployment.
 
 The current checkpoint contract describes:
 
@@ -91,7 +92,8 @@ orientation, controller configuration, hardware limits, observation age, and exe
 still need validation before publishing commands. Preserve the recorded joint coordinates
 and gripper values.
 
-Measure inference latency on the inference PC before selecting the execution prefix,
+Warm Edge/Nano HTTP latency is now measured on PRO 6000 in the runbook. Verify real
+network and robot timing during commissioning before selecting the execution prefix,
 trajectory timestamps, buffering, and refresh cadence. Preserve observation timestamps;
 a prediction based on stale images cannot be treated as a fresh 0.8-second forecast.
 The robot continues moving during inference, unlike a simulation that pauses its clock.

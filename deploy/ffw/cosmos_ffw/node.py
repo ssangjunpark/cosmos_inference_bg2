@@ -4,6 +4,7 @@ import argparse
 import json
 import signal
 import time
+import uuid
 
 from .core import BridgeError, CONTROLLERS, GROUPS, JointFeedback, Startup, hold_messages, load_home_yaml, require, stamp_ns, validate_profile
 from .chunks import ChunkExecutor
@@ -232,7 +233,11 @@ def make_node(profile, home, mode, velocity_scale):
                 self.get_logger().error("Could not send shutdown hold: " + str(error))
             self.closing = True
             self.startup.stop()
-            self.startup.epoch = "stopped"
+            self.startup.epoch = uuid.uuid4().hex
+            status = self.engine.status(self.now())
+            status.update(mode=self.mode, physical_publishing=self.mode == "execute",
+                          command_messages=self.command_count, reason="Companion stopped", controllers_ready=False)
+            self.status_pub.publish(String(data=json.dumps(status, allow_nan=False)))
             self.timer.cancel()
             self.health_timer.cancel()
 

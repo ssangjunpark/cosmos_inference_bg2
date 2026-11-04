@@ -1,0 +1,42 @@
+{
+  "builtin_interfaces/msg/Time.msg": {
+    "sha256": "dc5a01ddde3aecffee21eb24974fe77cc969f873218a2b1811aa0ac8a456b8bd",
+    "source": "/opt/ros/jazzy/share/builtin_interfaces/msg/Time.msg",
+    "package_version": "2.0.4",
+    "licenses": [
+      "Apache License 2.0"
+    ]
+  },
+  "std_msgs/msg/Header.msg": {
+    "sha256": "d2cea14630e39ed0fa5b432ba9160a7c38855b9427d3344f99e83e83facb53c2",
+    "source": "/opt/ros/jazzy/share/std_msgs/msg/Header.msg",
+    "package_version": "5.3.8",
+    "licenses": [
+      "Apache License 2.0"
+    ]
+  },
+  "std_msgs/msg/String.msg": {
+    "sha256": "2022b3f1c32b578ff8d54a9948a51a10778761e0ad4ba60e50ae51292ca16884",
+    "source": "/opt/ros/jazzy/share/std_msgs/msg/String.msg",
+    "package_version": "5.3.8",
+    "licenses": [
+      "Apache License 2.0"
+    ]
+  },
+  "sensor_msgs/msg/CompressedImage.msg": {
+    "sha256": "75ca1003981c407148ff94a3470760985dd69233b8287a5d52848d45a312f144",
+    "source": "/opt/ros/jazzy/share/sensor_msgs/msg/CompressedImage.msg",
+    "package_version": "5.3.8",
+    "licenses": [
+      "Apache License 2.0"
+    ]
+  },
+  "sensor_msgs/msg/JointState.msg": {
+    "sha256": "711d1771a002c7190e5bbe746a163a67477c1e2a45482a64f1fe339815ca6f5d",
+    "source": "/opt/ros/jazzy/share/sensor_msgs/msg/JointState.msg",
+    "package_version": "5.3.8",
+    "licenses": [
+      "Apache License 2.0"
+    ]
+  }
+}

@@ -87,8 +87,9 @@ class JointFeedback:
         require(source_ns > 0 and received_ns > 0, "Joint timestamps must be positive")
         return cls(int(source_ns), int(received_ns), q, v)
 
-    def fresh(self, now_ns, max_age_ns=100_000_000):
-        require(0 <= now_ns - self.received_ns <= max_age_ns, "Stale feedback receipt")
+    def fresh(self, now_ns, max_age_ns=100_000_000, *, receipt_now_ns=None):
+        receipt_now_ns = now_ns if receipt_now_ns is None else receipt_now_ns
+        require(0 <= receipt_now_ns - self.received_ns <= max_age_ns, "Stale feedback receipt")
         require(-25_000_000 <= now_ns - self.source_ns <= max_age_ns, "Stale feedback or unsynchronized robot clock")
 
 

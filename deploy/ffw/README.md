@@ -71,8 +71,10 @@ latency, jitter, and command-delivery margin, not a fixed assumed model speed.
 With observation request interval P and end-to-end latency L, continuous coverage
 requires P+L plus margin to fit inside the 0.8 s horizon. A serial one-in-flight worker
 also has P at least as large as its request latency. Cold recorded runs took about
-2.99 s (Edge) and 1.57 s (Nano), so those first-call timings cannot support this control
-cadence. Warm-up and sustained measurements/optimization are still required.
+2.99 s (Edge) and 1.57 s (Nano). The persistent service now warms before listening;
+five local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano
+0.401 s median / 0.440 s max. Real network/robot timing and sustained jitter still
+need checking. See the [pipeline runbook](../../docs/three_machine_pipeline.md).
 
 ## Wire protocol
 
@@ -128,9 +130,9 @@ in the inspection report without resolving its installed limit mismatch.
 The supplied reference profile is not live verified and explicitly disables execution.
 Preview never creates hardware trajectory publishers. Execute additionally requires
 an explicitly enabled verified profile and all runtime readiness/ownership conditions.
-The 5090 network gateway and PRO 6000 network RPC are separate remaining work; the earlier
-Unix-socket worker draft cannot span the two machines. No transfer or live test is part
-of packaging this folder.
+The 5090 network gateway and PRO 6000 authenticated HTTP RPC are implemented and tested
+locally. The earlier Unix-socket bridge is a legacy co-located draft; use the three-machine
+runbook. No transfer or live test is part of packaging this folder.
 
 All homing statuses must correspond to goals started after this companion begins; an
 old latched success cannot open readiness. External homing after capture invalidates

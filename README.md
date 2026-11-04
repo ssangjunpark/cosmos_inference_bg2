@@ -1,7 +1,11 @@
 # cosmos_inference_bg2
 
-Local setup for RobotEscape's Cosmos 3 Edge/Nano checkpoints. The endpoint is saved predicted
-outputs from a recorded observation. Hardware integration is deferred.
+RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model service, a thin
+5090 observation gateway, and a companion for the existing FFW-BG2 controllers. All code is
+prepared here first; neither remote machine has been modified or deployed to.
+
+Start with the [three-machine runbook](docs/three_machine_pipeline.md). It covers the three
+processes, SSH tunnel, preview, chunk timing, measured latency, and remaining hardware checks.
 
 NVIDIA's [policy-server guide](https://github.com/NVIDIA/cosmos-framework/blob/b98934eda43f4d31972538a527f8663f003c27dc/docs/action_policy_droid_server.md)
 provides the Dockerfile, `INSTALL_APEX=0` build flag, and exact policy dependency installation.
@@ -9,7 +13,7 @@ The checkout in `third_party/cosmos-framework` is pinned to the framework commit
 checkpoint's `input_contract.json`: `b98934eda43f4d31972538a527f8663f003c27dc`.
 Upstream source is unchanged; the root scripts contain the local integration.
 
-Remaining inference work is tracked in the [inference pipeline implementation plan](docs/inference_pipeline_plan.md).
+Inference implementation and recorded verification are tracked in the [inference pipeline plan](docs/inference_pipeline_plan.md).
 
 The planned physical-robot startup, configurable homing, and left-arm/lift hold behavior are
 recorded in the [BG2 startup and inference hold plan](docs/bg2_startup_and_hold_plan.md).
@@ -141,7 +145,9 @@ in the [implementation plan](docs/inference_pipeline_plan.md).
 
 ## Mounts
 
-Runtime containers have a read-only filesystem, run as your UID/GID, and have networking disabled.
+Model runtime containers have a read-only filesystem and run as your UID/GID. One-shot inference
+and doctor disable networking; the persistent server publishes only a localhost HTTP port
+for an authenticated SSH-tunnel connection from the 5090.
 Only the selected checkpoint, tokenizer, VAE, input archive, adapter directory, and local scripts
 are mounted read-only. For a Hugging Face tokenizer snapshot, its model cache repository is
 mounted read-only to preserve links into the adjacent blobs directory. Writable bind mounts are restricted to this workspace's `.runtime/cache/`
@@ -183,5 +189,16 @@ It defaults to preview and leaves existing ROBOTIS bringup/driver containers alo
 Read [FFW bundle documentation](deploy/ffw/README.md) for the chunk wire protocol and
 request/execution lifecycle. The 5090 forwards complete timestamped chunks; FFW validates
 and submits the remaining points to its existing trajectory controllers. New requests
-overlap execution; starvation produces a local hold. The 5090/server network transport
-and sustained latency validation remain unfinished. No bundle has been sent to FFW.
+overlap execution; starvation produces a local hold. The persistent server and asynchronous 5090 transport are implemented and tested locally.
+The matching gateway folder is prepared with:
+
+```bash
+python3 scripts/package_gateway.py --output outputs/gateway_bundle
+```
+
+Warm local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano
+0.401 s median / 0.440 s max over five requests each. Edge recorded output also passed
+the FFW trajectory gate with measured latency. Nano produced a small negative gripper
+target and was correctly rejected against reference limits; outputs are never silently
+clipped. Live camera transforms, installed hardware compatibility, and sustained network/robot
+behavior remain unverified. Neither bundle has been transferred or deployed.

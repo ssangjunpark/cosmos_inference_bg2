@@ -1,0 +1,15 @@
+# Resolved locally and exercised with SDK 0.1.8; SDK source is copied separately.
+apsw==3.54.1.0
+backports.zstd==1.8.0
+eclipse-zenoh==1.10.2
+gitdb==4.0.12
+GitPython==3.2.1
+json5==0.17.3
+lz4==4.4.5
+numpy==2.5.4
+pillow==13.0.0
+PyYAML==6.0.3
+rosbags==0.11.9
+ruamel.yaml==0.19.1
+smmap==5.0.3
+tqdm==4.70.1

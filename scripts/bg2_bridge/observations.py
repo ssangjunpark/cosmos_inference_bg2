@@ -52,6 +52,10 @@ class Observations:
             require(not frames or source_ns > frames[-1][0], "Camera timestamps must increase")
             frames.append((int(source_ns), int(received_ns), bytes(payload)))
 
+    def latest_source_ns(self):
+        with self.lock:
+            return self.joints[-1].source_ns if self.joints else 0
+
     def latest_feedback(self, now_ns):
         with self.lock:
             require(bool(self.joints), "Waiting for joint feedback")
@@ -59,7 +63,8 @@ class Observations:
         frame.fresh(now_ns)
         return frame
 
-    def snapshot(self, instruction, now_ns):
+    def snapshot(self, instruction, now_ns, *, receipt_now_ns=None):
+        receipt_now_ns = now_ns if receipt_now_ns is None else receipt_now_ns
         validate_profile(self.profile, live=True)
         require(isinstance(instruction, str) and instruction.strip(), "Instruction is empty")
         with self.lock:
@@ -75,8 +80,8 @@ class Observations:
                     break
             require(chosen is not None, "Camera/joint synchronization exceeds 25 ms")
             joint, frames = chosen
-        joint.fresh(now_ns)
-        require(all(0 <= now_ns - f[1] <= 100_000_000 and -25_000_000 <= now_ns - f[0] <= 100_000_000
+        joint.fresh(now_ns, receipt_now_ns=receipt_now_ns)
+        require(all(0 <= receipt_now_ns - f[1] <= 100_000_000 and -25_000_000 <= now_ns - f[0] <= 100_000_000
                     for f in frames.values()), "Stale camera or unsynchronized robot clock")
         result = {key: decode_view(frame[2], key, self.profile["cameras"][key]) for key, frame in frames.items()}
         result.update(joint_position=np.asarray([joint.positions[n] for n in JOINT_NAMES], dtype=np.float32),

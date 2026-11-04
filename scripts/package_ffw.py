@@ -16,7 +16,9 @@ def build(output):
         raise ValueError("Use a new output directory; earlier bundles are preserved")
     output.mkdir(parents=True)
     template = ROOT / "deploy/ffw"
-    sources = [p for p in template.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"]
+    names = ("Dockerfile", "compose.yaml", "run.sh", ".env.example", ".dockerignore", "README.md",
+             "verify_bundle.py", "cosmos_ffw/__init__.py", "cosmos_ffw/node.py", "cosmos_ffw/ros_messages.py")
+    sources = [template / name for name in names]
     for source in sources:
         target = output / source.relative_to(template)
         target.parent.mkdir(parents=True, exist_ok=True)
