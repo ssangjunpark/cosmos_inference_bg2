@@ -97,11 +97,11 @@ work. The existing PRO 6000 → `3sp5090` SSH alias is used to avoid a second SS
 
    ```bash
    ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-     -R 127.0.0.1:8008:127.0.0.1:8008 3sp5090
+     -R 127.0.0.1:18008:127.0.0.1:8008 3sp5090
    ```
 
    The SSH connection is initiated by PRO 6000 to the 5090's existing SSH service
-   (configured port 55031). The gateway still calls `http://127.0.0.1:8008` on the
+   (configured port 55031). The gateway calls `http://127.0.0.1:18008` on the
    5090; SSH carries that connection back to PRO 6000's local model service. The
    forwarded listener is bound only to 127.0.0.1. No extra SSH keys need to be copied.
 

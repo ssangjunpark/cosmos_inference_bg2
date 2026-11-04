@@ -31,10 +31,21 @@ no data or commands to the robot.
 ```bash
 ssh -N -T -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-  -R 127.0.0.1:8008:127.0.0.1:8008 3sp5090
+  -R 127.0.0.1:18008:127.0.0.1:8008 3sp5090
 ```
 
 Keep it running. No output is expected on a successful tunnel connection.
+Run this command on PRO 6000: the first port (`18008`) is on the 5090, and the
+last port (`8008`) is the model service on PRO 6000. The gateway `.env` uses
+`COSMOS_SERVER_URL=http://127.0.0.1:18008`.
+
+A background tunnel was opened during troubleshooting with the control socket
+`.runtime/ssh_5090_observation.sock` on PRO 6000. Do not start a duplicate tunnel
+while it is active. To stop that specific background tunnel from the repository:
+
+```bash
+ssh -S "$PWD/.runtime/ssh_5090_observation.sock" -O exit 3sp5090
+```
 
 ## FFW — terminal 1
 
@@ -69,7 +80,7 @@ From a terminal on the 5090:
 
 ```bash
 cd /home/sangjunpark/cosmos_bg2_gateway
-python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8008/health",timeout=5).read().decode())'
+python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:18008/health",timeout=5).read().decode())'
 mkdir -p logs
 COSMOS_INSPECT_ID=$(TZ=Asia/Seoul date +%Y%m%d-%H%M%S)
 docker compose run --rm --no-deps gateway inspect \

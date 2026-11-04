@@ -1,7 +1,7 @@
 digraph cosmos_bg2 {
   graph [rankdir=LR, bgcolor="#F7F9FC", pad="0.45", nodesep="0.4", ranksep="0.7", splines=line,
     fontname="DejaVu Sans", fontsize=23, fontcolor="#14243A", labelloc=t,
-    label="COSMOS BG2  |  Scripts, machines and communication\nSoftware tested locally; physical deployment and SSH/LAN commissioning remain pending.\n"];
+    label="COSMOS BG2  |  Scripts, machines and communication\n5090 SSH transport verified; physical policy execution remains pending.\n"];
   node [shape=plain, fontname="DejaVu Sans", fontsize=14, fontcolor="#14243A"];
   edge [fontname="DejaVu Sans", fontsize=12, fontcolor="#334155", penwidth=1.8, arrowsize=0.8];
 
@@ -57,8 +57,8 @@ digraph cosmos_bg2 {
       </TD></TR>
       <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Use fresh FFW status</B><BR ALIGN="LEFT"/>Matching preview/execute mode + session<BR ALIGN="LEFT"/>Explicit stop goes back to FFW<BR ALIGN="LEFT"/></TD></TR>
       <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
-        <B>SSH tunnel runs on this PC</B><BR/><BR ALIGN="LEFT"/>
-        Tunnel endpoint: 127.0.0.1:8008<BR ALIGN="LEFT"/>
+        <B>Forwarded listener on this PC</B><BR/><BR ALIGN="LEFT"/>
+        Tunnel endpoint: 127.0.0.1:18008<BR ALIGN="LEFT"/>
         PRO 6000 opens reverse SSH to 5090<BR ALIGN="LEFT"/>
         5090 SSH port: 55031<BR ALIGN="LEFT"/>
       </TD></TR>
@@ -106,7 +106,7 @@ digraph cosmos_bg2 {
   >];
   ssh [label=<
     <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="10">
-      <TR><TD WIDTH="275" HEIGHT="100"><B>HTTP THROUGH SSH</B><BR/>Local endpoint: port 8008</TD></TR>
+      <TR><TD WIDTH="275" HEIGHT="100"><B>HTTP THROUGH SSH</B><BR/>5090: 18008 / PRO 6000: 8008</TD></TR>
       <TR><TD PORT="obs" HEIGHT="170">OBSERVATION REQUEST<BR/>3 RGB views + 8 current joints<BR/>instruction + robot timestamp<BR/>NPZ / POST /predict</TD></TR>
       <TR><TD PORT="reply" HEIGHT="80">PREDICTION RESPONSE<BR/>16 x 8 positions + IDs<BR/>JSON / HTTP response</TD></TR>
       <TR><TD HEIGHT="230"></TD></TR>

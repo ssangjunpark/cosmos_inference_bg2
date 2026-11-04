@@ -10,7 +10,7 @@
 <title>cosmos_bg2</title>
 <polygon fill="#f7f9fc" stroke="transparent" points="-32.4,32.4 -32.4,-912.4 2023.4,-912.4 2023.4,32.4 -32.4,32.4"/>
 <text text-anchor="middle" x="995.5" y="-857.6" font-family="DejaVu Sans" font-size="23.00" fill="#14243a">COSMOS BG2 &#160;| &#160;Scripts, machines and communication</text>
-<text text-anchor="middle" x="995.5" y="-832.6" font-family="DejaVu Sans" font-size="23.00" fill="#14243a">Software tested locally; physical deployment and SSH/LAN commissioning remain pending.</text>
+<text text-anchor="middle" x="995.5" y="-832.6" font-family="DejaVu Sans" font-size="23.00" fill="#14243a">5090 SSH transport verified; physical policy execution remains pending.</text>
 <!-- ffw -->
 <g id="node1" class="node">
 <title>ffw</title>
@@ -111,9 +111,9 @@
 <text text-anchor="start" x="779.5" y="-190.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Matching preview/execute mode + session</text>
 <text text-anchor="start" x="779.5" y="-176.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Explicit stop goes back to FFW</text>
 <polygon fill="white" stroke="transparent" points="763.5,-1 763.5,-146 1188.5,-146 1188.5,-1 763.5,-1"/>
-<text text-anchor="start" x="807" y="-105.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="844" y="-105.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">SSH tunnel runs on this PC</text>
-<text text-anchor="start" x="779.5" y="-77.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Tunnel endpoint: 127.0.0.1:8008</text>
+<text text-anchor="start" x="795.5" y="-105.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;</text>
+<text text-anchor="start" x="832.5" y="-105.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">Forwarded listener on this PC</text>
+<text text-anchor="start" x="779.5" y="-77.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Tunnel endpoint: 127.0.0.1:18008</text>
 <text text-anchor="start" x="779.5" y="-63.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;PRO 6000 opens reverse SSH to 5090</text>
 <text text-anchor="start" x="779.5" y="-49.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;5090 SSH port: 55031</text>
 <text text-anchor="start" x="916" y="-35.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;</text>
@@ -128,7 +128,7 @@
 <g id="node5" class="node">
 <title>ssh</title>
 <text text-anchor="start" x="1296" y="-774.8" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">HTTP THROUGH SSH</text>
-<text text-anchor="start" x="1287" y="-760.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Local endpoint: port 8008</text>
+<text text-anchor="start" x="1267.5" y="-760.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">5090: 18008 / PRO 6000: 8008</text>
 <text text-anchor="start" x="1291.5" y="-654.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">OBSERVATION REQUEST</text>
 <text text-anchor="start" x="1270" y="-639.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">3 RGB views + 8 current joints</text>
 <text text-anchor="start" x="1271.5" y="-624.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">instruction + robot timestamp</text>
