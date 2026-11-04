@@ -1,5 +1,9 @@
 # Normal policy inference with robot movement
 
+For current commands on each machine and end-of-session cleanup, use the
+[experiment runbook](experiment_runbook.md). This page retains detailed behavior and
+earlier setup context.
+
 Prepared 2026-11-05 KST. The operator authorized normal execution and an upper-limit
 override of head_joint1 from 0.6951 to 0.78 radians for the existing SNUPI home.
 Only the separate `profile.execute.json` contains this override. The ROBOTIS model,

@@ -2,13 +2,16 @@
 
 RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model service, a thin
 5090 observation gateway, and a companion for the existing FFW-BG2 controllers. All code is
-prepared here first. The gateway is now installed on 3sp5090; FFW remains unchanged.
+prepared here first. The gateway is installed on 3sp5090 and the companion is installed on
+FFW; the existing ROBOTIS stack remains separately managed.
 
 The current control contract is **hold → fresh observation → infer → execute all 16 points
 → hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).
 
-Start with the [three-machine runbook](docs/three_machine_pipeline.md). It covers the three
-processes, SSH tunnel, preview, chunk timing, measured latency, and remaining hardware checks.
+Start with the [experiment runbook](docs/experiment_runbook.md): exact commands by machine
+for Nano/Edge startup, SNUPI initialization, debug/execution, pause/resume, model switching
+and cleanup. The [pipeline reference](docs/three_machine_pipeline.md) provides architecture
+and earlier integration details.
 
 NVIDIA's [policy-server guide](https://github.com/NVIDIA/cosmos-framework/blob/b98934eda43f4d31972538a527f8663f003c27dc/docs/action_policy_droid_server.md)
 provides the Dockerfile, `INSTALL_APEX=0` build flag, and exact policy dependency installation.
@@ -24,8 +27,9 @@ recorded in the [BG2 startup and inference hold plan](docs/bg2_startup_and_hold_
 ROBOTIS integration source is pinned in `third_party/ai_worker` and
 `third_party/zenoh_ros2_sdk`. The SDK revision matches the inspected inference-PC checkout.
 The [BG2 reference profile](profiles/robotis_bg2_rev4.reference.json) records discovered
-interfaces with execution disabled; live hardware compatibility is still unverified.
-The user authorized gateway setup on `3sp5090`. See the [5090 setup record](docs/5090_setup_20261104.md). FFW remains read-only.
+interfaces with execution disabled. Installed execution uses a separate operator-enabled
+profile, as described in the experiment runbook. See the historical
+[5090 setup record](docs/5090_setup_20261104.md) and [FFW installation record](docs/ffw_setup_20261105.md).
 
 
 ## Clone

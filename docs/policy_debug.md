@@ -1,5 +1,9 @@
 # Policy debug without robot movement
 
+For current commands on each machine and end-of-session cleanup, use the
+[experiment runbook](experiment_runbook.md). This page retains detailed behavior and
+earlier setup context.
+
 The BG2 request uses `mode="policy"`, matching the supplied training loader and
 both Edge/Nano checkpoints. It predicts 16 absolute right-arm/gripper targets at
 50 ms intervals. No imagined future video or extra VAE decoding is requested.
