@@ -25,7 +25,7 @@ follower or a competing VR/teleoperation publisher. The companion defaults to
 `COSMOS_INITIALIZATION=current`: it checks fresh, settled feedback for 500 ms and
 captures the measured pose. It does not require another home move, including after
 a companion restart. Current-pose settling uses the YAML position tolerance and the existing
-2 rad/s angular limit; the original linear lift settling tolerance is retained; finite feedback, controller health and ownership checks remain.
+4 rad/s angular limit; the original linear lift settling tolerance is retained; finite feedback, controller health and ownership checks remain.
 Current mode does not subscribe to or act on controller homing/action statuses.
 Completed or aborted controller goals therefore cannot falsely invalidate it.
 If you want a specific initial pose, put the robot there using ROBOTIS first.
@@ -184,7 +184,7 @@ disable or an independent emergency stop; use the robot's stop for urgent stoppi
 The operator removed bridge position-range rejection for all joints after measured
 head feedback reached 0.780796 rad around the 0.78-radian SNUPI target. Measured holds,
 startup feedback and finite predicted targets are no longer rejected against reference
-position bounds. Values are not clipped to those bounds. Finite/shape, 2 rad/s,
+position bounds. Values are not clipped to those bounds. Finite/shape, 4 rad/s,
 10-degree tracking, freshness and controller/ownership checks remain. ROBOTIS model
 and controller configuration are unchanged; profile ranges remain reference metadata.
 
@@ -206,9 +206,42 @@ execution-disabled reference/debug behavior; no ROBOTIS model edits need reverti
 ## Startup waiting diagnostics
 
 `settling` means no policy chunk has started. Current-pose startup uses fresh feedback
-for 500 ms, the existing position-stability tolerance and the operator's 2 rad/s angular
+for 500 ms, the existing position-stability tolerance and the operator's 4 rad/s angular
 limit. It does not require gripper velocity feedback to remain below the YAML homing
 threshold of 0.01 rad/s: live feedback reached 0.0955 rad/s while measured position
 variation was only 0.001534 rad. The gateway prints the actual FFW phase and reason
 instead of describing all startup waiting as an unfinished trajectory. The optional
 homing mode retains its original YAML tolerances.
+
+## Replacement trajectory start state
+
+Read-only inspection of the installed arm_r_controller confirmed
+`interpolate_from_desired_state=false`, `open_loop_control=false`, and spline interpolation.
+The bridge uses the fresh measured state at chunk acceptance for its tracking reference.
+The operator selected a measured-velocity-only stop at **4 rad/s**; target-to-target and
+hold-to-target differences are not used to reject a chunk. The **10-degree tracking stop**
+remains. The previous commanded endpoint remains the normal inference hold. All 16 targets
+and timestamps are unchanged. The first moving run hit the former command-step check at
+2.1835 rad/s; that command-step check has been removed.
+
+## Why `up` and `restart` behave differently
+
+The three environment variables select the execution profile, execute mode and capture
+of the current measured pose. `docker compose up --no-build --pull never` creates/starts
+the companion as needed using the installed image and attaches this terminal to its logs.
+For an already-running, unchanged container, it just attaches; it does not restart Python,
+reload imported source files, or clear a fault latched by the companion.
+
+A normal gateway Ctrl+C pauses the companion; the next gateway run resumes it without
+restarting or homing. A terminal fault or a Python code update currently requires a process
+restart. First stop the 5090 gateway with Ctrl+C. Then, in another SSH terminal on the
+**FFW host** (outside `ai_worker`), run:
+
+```bash
+cd ~/cosmos_ffw_companion
+docker compose restart companion
+```
+
+Leave the ROBOTIS follower running. This reloads the companion and captures the current
+measured pose in current mode; it does not home the robot or reset ROBOTIS. Wait for the
+companion to be ready, then rerun the 5090 gateway command.

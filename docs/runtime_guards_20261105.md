@@ -1,16 +1,16 @@
 # Remaining runtime checks — 2026-11-05 KST
 
-This is an audit of current code, not a change to the thresholds below.
+Updated for the operator's measured-only 4 rad/s stop; the 10-degree tracking stop remains.
 
 | Check | Current value/behavior | Source/purpose |
 | --- | --- | --- |
-| Planned angular velocity | 2 rad/s, including the first 50 ms segment | Operator requested |
-| Measured angular velocity | 2 rad/s, one feedback sample can fault | Operator requested |
+| Command-step angular velocity | No target-step rejection, scaling or retiming | Operator selected measured velocity only |
+| Measured angular velocity | 4 rad/s, one feedback sample can fault | Operator requested |
 | Angular tracking error | 10 degrees against interpolated commanded reference | Operator requested |
 | Gripper floor | Negative predicted right-gripper targets become zero | Operator requested; no other position clipping |
 | Initial capture | 500 ms continuous fresh, stable measured feedback | Bridge startup assumption |
 | Initial position stability | YAML position_tolerance, currently 0.1 rad for angular joints and 0.1 m for lift | Existing YAML reused by bridge |
-| Current-pose startup velocity | 2 rad/s for angular joints; lift retains YAML 0.01 m/s | Angular startup gate corrected from 0.01 after measured gripper jitter |
+| Current-pose startup velocity | 4 rad/s for angular joints; lift retains YAML 0.01 m/s | Angular startup gate corrected from 0.01 after measured gripper jitter |
 | Optional homing-mode settling | YAML velocity_tolerance, currently 0.01; fresh successful homing statuses required | Only when initialization=homing; current mode is default |
 | Joint feedback freshness | At most 100 ms source/receipt age; at most 25 ms future timestamp | Bridge timing assumption |
 | Camera freshness | At most 100 ms source/receipt age; at most 25 ms future timestamp | Bridge timing assumption |

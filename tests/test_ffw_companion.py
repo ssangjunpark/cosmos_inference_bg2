@@ -205,32 +205,48 @@ class ChunkTests(unittest.TestCase):
         self.assertEqual(self.engine.cycle,0)
         self.assertIsNone(self.engine.last_completed_request_id)
 
-    def test_commanded_velocity_limit_is_absolute_2_radians_not_quarter_of_urdf(self):
-        for delta,allowed in [(.09,True),(.1,True),(.10001,False)]:
+    def test_target_steps_are_forwarded_unchanged_without_command_velocity_cap(self):
+        for delta in [.1, .21, -.21, 4.]:
             startup,frame=ready(); engine=ChunkExecutor(startup);engine.tick(frame,frame.source_ns)
             data=chunk(startup,frame.source_ns)
-            for row in data['positions']: row[0]=frame.positions['arm_r_joint1']+delta
+            for index,row in enumerate(data['positions']):
+                row[0]=delta if index%2==0 else -delta
             with self.subTest(delta=delta):
-                if allowed:
-                    commands=engine.accept(data,frame,frame.source_ns)
-                    self.assertEqual(commands['arm_right']['message']['points'][0]['positions'][0],delta)
-                else:
-                    with self.assertRaisesRegex(SafetyStop,'2 rad/s'):engine.accept(data,frame,frame.source_ns)
+                commands=engine.accept(data,frame,frame.source_ns)
+                points=commands['arm_right']['message']['points']
+                self.assertEqual([p['positions'] for p in points],data['positions'])
+                self.assertEqual([p['time_from_start']['sec']*10**9+p['time_from_start']['nanosec'] for p in points],
+                                 [(i+1)*50_000_000 for i in range(16)])
 
-    def test_first_segment_checks_held_command_as_well_as_measured_start(self):
-        pose=dict(self.frame.positions);pose['arm_r_joint1']=.15  # Still within the 10 degree tracking bound.
+    def test_first_segment_and_tracking_start_from_measured_controller_state(self):
+        pose=dict(self.frame.positions);pose['arm_r_joint1']=.15
         data=chunk(self.startup,self.source)
-        for row in data['positions']:row[0]=.15  # Zero distance from measurement but 3 rad/s from the commanded hold.
-        with self.assertRaisesRegex(SafetyStop,'preceding hold'):
-            self.engine.accept(data,feedback(self.startup.profile,self.source,pose),self.source)
+        for row in data['positions']:row[0]=.15
+        commands=self.engine.accept(data,feedback(self.startup.profile,self.source,pose),self.source)
+        self.assertEqual(commands['arm_right']['message']['points'][0]['positions'][0],.15)
+        self.assertEqual(self.engine.expected_right(self.source+25_000_000)['arm_r_joint1'],.15)
+
+    def test_recorded_second_chunk_accepts_target_step_and_tracks_from_measured_state(self):
+        # Recorded elbow transition; measured velocity is zero despite a >2 rad/s target step.
+        measured=-1.79437402663;held=-1.7946068048477173;target=-1.685431957244873
+        startup,frame=ready(custom={'arm_r_joint4':measured})
+        engine=ChunkExecutor(startup);engine.tick(frame,frame.source_ns)
+        engine.right_hold['arm_r_joint4']=held
+        data=chunk(startup,frame.source_ns)
+        for row in data['positions']:row[3]=target
+        self.assertGreater(abs(target-held)/.05,2.)
+        self.assertGreater(abs(target-measured)/.05,2.)
+        commands=engine.accept(data,frame,frame.source_ns)
+        self.assertEqual([p['positions'] for p in commands['arm_right']['message']['points']],data['positions'])
+        self.assertAlmostEqual(engine.expected_right(frame.source_ns+25_000_000)['arm_r_joint4'],(measured+target)/2)
 
     def test_measured_velocity_limit_checks_both_signs_and_boundary(self):
-        for speed in [2.,-2.,2.001,-2.001]:
+        for speed in [4.,-4.,4.001,-4.001]:
             frame=feedback(self.startup.profile,self.source,self.frame.positions,{'arm_r_joint1':speed})
             with self.subTest(speed=speed):
-                if abs(speed)<=2: self.engine.monitor(frame,self.source)
+                if abs(speed)<=4: self.engine.monitor(frame,self.source)
                 else:
-                    with self.assertRaisesRegex(SafetyStop,'2 rad/s'):self.engine.monitor(frame,self.source)
+                    with self.assertRaisesRegex(SafetyStop,'4 rad/s'):self.engine.monitor(frame,self.source)
 
     def test_angular_tracking_limit_is_ten_degrees_for_right_and_passive_joints(self):
         for name in ['arm_r_joint1','arm_l_joint1','head_joint1']:
@@ -254,8 +270,8 @@ class ChunkTests(unittest.TestCase):
         pose=dict(self.frame.positions);pose['lift_joint']=-.3
         self.engine.monitor(feedback(self.startup.profile,self.source,pose,{'lift_joint':3.}),self.source)
 
-    def test_nonfinite_and_excessive_velocity_predictions_are_safety_stops(self):
-        for value in [float('nan'),4.]:
+    def test_nonfinite_predictions_are_safety_stops(self):
+        for value in [float('nan'),float('inf'),float('-inf')]:
             data=chunk(self.startup,self.source);data['positions'][0][0]=value
             with self.subTest(value=value),self.assertRaises(SafetyStop):self.accept(data)
 
@@ -506,24 +522,35 @@ class NodeWiringTests(unittest.TestCase):
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
         before=node.command_count
         data=chunk(node.startup,node.feedback.source_ns)
-        data['positions'][0][0]=.11
+        data['positions'][0][0]=float('nan')
         node.chunk(NS(data=json.dumps(data)))
-        self.assertEqual(node.startup.phase,'fault');self.assertIn('2 rad/s',node.reason)
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('finite',node.reason)
         self.assertEqual(node.command_count,before+4)
         self.assertFalse(node.engine.status(node.robot_ns)['needs_chunk'])
         before=node.command_count
         node.chunk(NS(data=json.dumps(chunk(node.startup,node.feedback.source_ns,index=2))))
         self.assertEqual(node.command_count,before)
 
+    def test_chunk_checks_measured_velocity_before_publishing(self):
+        import time
+        from types import SimpleNamespace as NS
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        node.feedback=feedback(profile(),node.robot_ns,node.feedback.positions,{'arm_r_joint1':4.01})
+        before=node.command_count
+        node.chunk(NS(data=json.dumps(chunk(node.startup,node.feedback.source_ns))))
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('4 rad/s',node.reason)
+        self.assertIsNone(node.engine.last_request_id)
+        self.assertEqual(node.command_count,before+4)
+
     def test_measured_velocity_violation_in_joint_callback_faults_and_stops(self):
         import time
         from types import SimpleNamespace as NS
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
-        names=all_names(profile()); velocities=[0.]*len(names);velocities[names.index('arm_r_joint1')]=2.01
+        names=all_names(profile()); velocities=[0.]*len(names);velocities[names.index('arm_r_joint1')]=4.01
         stamp=NS(sec=node.robot_ns//10**9,nanosec=node.robot_ns%10**9+1)
         before=node.command_count
         node.joints(NS(name=names,position=[node.feedback.positions[n] for n in names],velocity=velocities,header=NS(stamp=stamp)))
-        self.assertEqual(node.startup.phase,'fault');self.assertIn('2 rad/s',node.reason)
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('4 rad/s',node.reason)
         self.assertEqual(node.command_count,before+4)
 
     def test_runtime_tracking_violation_faults_and_stops(self):

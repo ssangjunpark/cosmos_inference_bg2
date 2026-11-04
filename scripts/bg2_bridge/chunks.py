@@ -42,11 +42,12 @@ class ChunkExecutor:
         source = chunk.get("source_time_ns")
         require(type(source) is int and source >= self.ready_since_ns and source > self.last_source_ns,
                 "Observation must be captured after the preceding hold")
-        commands = trajectories(chunk, feedback, self.startup, now_ns, held_command=self.right_hold)
+        commands = trajectories(chunk, feedback, self.startup, now_ns)
         if submit is not None:
             submit(commands)
-        self.start_positions = dict(self.startup.hold)
-        self.start_positions.update(self.right_hold)
+        # Installed JTC has interpolate_from_desired_state=false.
+        # New trajectories interpolate from measured state, not the old endpoint.
+        self.start_positions = dict(feedback.positions)
         self.last_source_ns, self.last_request_id = source, ident
         self.last_commands = commands
         self.execution_end_ns = now_ns + 800_000_000
@@ -78,7 +79,7 @@ class ChunkExecutor:
         expected.update(self.expected_right(feedback.source_ns))
         for name in angular_names(self.startup.profile):
             safety_require(abs(feedback.velocities[name]) <= MAX_ANGULAR_VELOCITY,
-                           f"Measured angular velocity exceeds 2 rad/s: {name}")
+                           f"Measured angular velocity exceeds {MAX_ANGULAR_VELOCITY:g} rad/s: {name}")
             safety_require(abs(feedback.positions[name] - expected[name]) <= MAX_ANGULAR_ERROR + 1e-9,
                            f"Angular tracking error exceeds 10 degrees: {name}")
 

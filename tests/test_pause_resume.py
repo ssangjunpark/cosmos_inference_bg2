@@ -37,7 +37,7 @@ class CurrentPoseTests(unittest.TestCase):
 
     def test_motion_and_feedback_gaps_reset_settling(self):
         p,start=self.startup();start.update(feedback(p,BASE),BASE)
-        start.update(feedback(p,BASE+400_000_000,velocities={'arm_r_joint1':2.01}),BASE+400_000_000)
+        start.update(feedback(p,BASE+400_000_000,velocities={'arm_r_joint1':4.01}),BASE+400_000_000)
         self.assertIsNone(start.hold)
         for i in range(10):
             now=BASE+450_000_000+i*50_000_000;start.update(feedback(p,now),now)
@@ -121,7 +121,7 @@ class PauseTests(unittest.TestCase):
 
     def test_fault_cannot_resume_and_paused_monitoring_still_applies(self):
         start,frame,engine=self.engine();engine.pause(frame,frame.source_ns)
-        bad=feedback(start.profile,frame.source_ns+1,velocities={'arm_r_joint1':2.01})
+        bad=feedback(start.profile,frame.source_ns+1,velocities={'arm_r_joint1':4.01})
         with self.assertRaises(SafetyStop):engine.resume(bad,bad.source_ns)
         engine.stop(frame,frame.source_ns,fault=True)
         with self.assertRaises(BridgeError):engine.resume(frame,frame.source_ns)

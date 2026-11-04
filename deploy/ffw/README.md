@@ -30,8 +30,9 @@ matches training. Full details are in `docs/synchronous_execution_20261104.md` i
 
 ## Stop limits
 
-Angular planned/measured velocity above **2 rad/s** or tracking error above **10 degrees**
+Measured angular velocity above **4 rad/s** or tracking error above **10 degrees**
 causes a terminal session fault and a best-effort fresh measured-position stop hold.
+Command steps are forwarded unchanged; no command-step speed rejection is applied.
 The angle limits apply to angular joints, including the grippers and head, not the linear
 elevator. Finite-value and freshness/controller checks remain. Bridge position-range rejection
 was removed for all joints at the operator's request. Targets are never scaled,
@@ -84,7 +85,7 @@ Zenoh router is reused. This container does not start ROBOTIS or homing.
 The selected SNUPI file is `bg2_vr_startup_snupi.yaml`. Reference position ranges
 remain metadata; the bridge no longer rejects measured holds or predicted targets
 against them. The operator requested this after slight head feedback variation around
-the SNUPI target. Finite values, 2 rad/s and 10-degree stops, freshness, ownership and
+the SNUPI target. Finite values, 4 rad/s and 10-degree stops, freshness, ownership and
 controller health remain enforced. The ROBOTIS model/YAML were not edited.
 
 ## Restart, rollback and validation boundary

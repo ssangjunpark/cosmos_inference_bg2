@@ -151,6 +151,8 @@ def make_node(profile, home, mode, *, require_homing=True):
                     self.guard()
                 require(self.feedback is not None, "Waiting for feedback")
                 data = json.loads(msg.data)
+                if self.mode == "execute":
+                    self.engine.monitor(self.feedback, self.now())
                 self.engine.accept(data, self.feedback, self.now(), submit=self.send)
                 self.stop_sent = False
                 self.reason, self.last_rejection = "Chunk accepted", None

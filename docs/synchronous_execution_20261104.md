@@ -47,19 +47,20 @@ of exact measured arrival. Tracking is monitored separately with the operator's 
 A lost chunk/acknowledgement leaves the gateway waiting and FFW holding; it does not start
 another request from a stale ready message. Restart after diagnosing the delivery failure.
 
-## Operator-specified stops
+## Operator-specified stops (updated 2026-11-05)
 
-- Planned angular motion: stop the session if any right-arm/gripper segment, including
-  the preceding hold command and measured start to the first target over 50 ms, requires more than **2 rad/s**.
+- Command-step velocity: no target-step rejection, scaling or retiming. The operator
+  selected measured velocity only.
 - Measured motion: while execute mode is initialized, stop if any monitored angular joint
-  reports absolute velocity above **2 rad/s**.
+  reports absolute velocity above **4 rad/s**.
 - Tracking: stop if any angular joint differs by more than **10 degrees** from its current
-  command reference. The right-arm reference interpolates the commanded waypoints from the preceding hold; passive
+  command reference. The right-arm reference interpolates the commanded waypoints from fresh measured state at acceptance; passive
   angular joints use captured holds. Holding uses the last commanded right target.
 - These are absolute thresholds, not multipliers. No predicted target is scaled or retimed.
-- The elevator is prismatic. Neither rad/s nor degrees is applied to it. Its captured hold,
-  position bounds, and feedback/controller checks remain; no new linear threshold is guessed.
-- Nonfinite or out-of-bounds predicted targets also raise a terminal safety fault.
+- The elevator is prismatic. Neither rad/s nor degrees is applied to it. Its captured hold
+  and feedback/controller checks remain; no new linear threshold is guessed.
+- Nonfinite predicted targets raise a terminal safety fault. Bridge position-range rejection
+  has been removed for all joints; the ROBOTIS controller/driver configuration is unchanged.
 
 A motion-limit fault sends a best-effort hold at fresh measured positions for all groups,
 latches `fault`, clears request readiness, and prevents automatic continuation. If feedback
@@ -108,5 +109,5 @@ The local CPU suite runs 90 tests: 89 pass and one optional SDK check skips in t
 environment; that SDK check also passes separately in the isolated local SDK environment. Coverage includes a real local HTTP request held longer than 0.8 seconds,
 all 16 targets unchanged, delayed/stale status, no mid-chunk request or replacement,
 post-hold camera/joint timestamps, final commanded holds despite different measurements,
-2 rad/s and 10 degree boundaries, terminal ROS-node stop behavior, old-protocol rejection,
+4 rad/s and 10 degree boundaries, terminal ROS-node stop behavior, old-protocol rejection,
 feedback/ownership faults, and bundle portability. This is software validation only.

@@ -22,7 +22,7 @@ class SafetyStop(BridgeError):
     """A motion-limit violation that must latch the session in fault."""
 
 
-MAX_ANGULAR_VELOCITY = 2.0  # rad/s, explicitly requested by the operator
+MAX_ANGULAR_VELOCITY = 4.0  # rad/s, explicitly requested by the operator
 MAX_ANGULAR_ERROR = math.radians(10)
 
 
@@ -254,7 +254,7 @@ def message(names, rows, offsets, start_ns):
                         "time_from_start": ros_time(offset)} for row, offset in zip(rows, offsets)]}
 
 
-def trajectories(prediction, feedback, startup, now_ns, *, held_command=None):
+def trajectories(prediction, feedback, startup, now_ns):
     """Send all 16 unchanged predictions at 50..800 ms from execution start."""
     require(startup.phase in ("ready", "holding") and startup.hold is not None,
             "A full chunk can start only while holding after initialization")
@@ -272,14 +272,7 @@ def trajectories(prediction, feedback, startup, now_ns, *, held_command=None):
             check_positions(right, row, startup.profile)
         except BridgeError as error:
             raise SafetyStop(str(error)) from error
-    previous = np.asarray([feedback.positions[n] for n in right])
-    if held_command is not None:
-        safety_require(np.all(np.abs(values[0] - np.asarray([held_command[n] for n in right])) / .05 <= MAX_ANGULAR_VELOCITY + 1e-9),
-                       "Commanded angular velocity exceeds 2 rad/s from the preceding hold")
-    for row in values:
-        safety_require(np.all(np.abs(row - previous) / .05 <= MAX_ANGULAR_VELOCITY + 1e-9),
-                       "Commanded angular velocity exceeds 2 rad/s")
-        previous = row
+    # Operator requested measured-velocity monitoring only; target steps are unchanged.
     offsets = [(i + 1) * 50_000_000 for i in range(16)]
     result = {}
     for group in GROUPS:
