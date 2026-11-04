@@ -14,6 +14,13 @@ Remaining inference work is tracked in the [inference pipeline implementation pl
 The planned physical-robot startup, configurable homing, and left-arm/lift hold behavior are
 recorded in the [BG2 startup and inference hold plan](docs/bg2_startup_and_hold_plan.md).
 
+ROBOTIS integration source is pinned in `third_party/ai_worker` and
+`third_party/zenoh_ros2_sdk`. The SDK revision matches the inspected inference-PC checkout.
+The [BG2 reference profile](profiles/robotis_bg2_rev4.reference.json) records discovered
+interfaces with execution disabled; live hardware compatibility is still unverified.
+The remote inference PC `3sp5090` is restricted to read-only inspection.
+
+
 ## Clone
 
 Clone this repository with its pinned Cosmos Framework submodule:

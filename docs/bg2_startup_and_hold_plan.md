@@ -3,9 +3,10 @@
 Agreed on 2026-11-04 for `cosmos_inference_bg2`, to be cloned onto the inference PC
 that communicates with the physical ROBOTIS FFW-BG2.
 
-This is the design for the next integration stage. The current runner saves outputs from
-recorded native samples; robot communication, homing coordination, and hold behavior are
-not implemented yet.
+Recorded-observation inference has passed for both Edge and Nano. Hardware integration
+is now being prepared locally. The `3sp5090` inference PC is restricted to read-only
+inspection: no file edits, installs, container restarts, homing, or controller changes there.
+Robot communication, homing coordination, and hold behavior are not implemented yet.
 
 ## Agreed behavior
 
@@ -80,10 +81,12 @@ The current checkpoint contract describes:
 - One current measured joint state and three camera views.
 - Training-specific joint normalization, camera preprocessing, and native prompt formatting.
 
-Raw saved framework outputs are not yet validated controller commands. The matching model
-and data adapter must establish output row indexing, padding, normalization, units, signs,
-and gripper semantics before any values are published. Do not apply the public DROID
-gripper conversion to this custom policy without evidence.
+The matching `cosmos_futurejoint` source is integrated. Recorded Edge/Nano runs return
+16-by-8 absolute right-arm/gripper positions in recorded radians after one inverse affine.
+Domain 33, padding, current-state conditioning, and row selection are verified. Live camera
+orientation, controller configuration, hardware limits, observation age, and execution timing
+still need validation before publishing commands. Preserve the recorded joint coordinates
+and gripper values.
 
 Measure inference latency on the inference PC before selecting the execution prefix,
 trajectory timestamps, buffering, and refresh cadence. Preserve observation timestamps;
@@ -122,35 +125,62 @@ It lists both arms, and its sender fills omitted joint commands with zero. It al
 single immediate trajectory point. Our bridge must explicitly separate right-arm policy
 commands from left/lift/head hold commands and provide deliberate trajectory timing.
 
+## Read-only inference-PC inspection (2026-11-04)
+
+`3sp5090` is an x86_64 Ubuntu 24.04.5 inference PC. Its existing containers use ROS 2
+Jazzy, `rmw_zenoh_cpp`, and ROS domain 30. Existing configuration names the robot router
+at `192.168.0.14:7447`; reachability was not tested during this inspection.
+
+The existing deployments include a pi0.5 EE10 runtime and a separate motion-preview setup.
+Their existence does not establish controller ownership or authorize their reuse for Cosmos
+joint-position commands. No management scripts, ROS services, or robot command topics were invoked.
+
+Local pinned source dependencies:
+
+- `third_party/ai_worker`: official Jazzy branch, commit `7c6605c6f006e840566c8db4fecaddda47e9a786` (2.3.2).
+  This is a reference checkout; the installed onboard driver revision is unverified.
+- `third_party/zenoh_ros2_sdk`: commit `be2c4d4595305a9c282fca09820a8b3bfb8076a3` (0.1.8), matching
+  the Git revision read from both inspected SDK checkouts on the inference PC.
+
+Both are proper Git submodules with local lock files. Neither repository has been modified
+or installed on `3sp5090`. The standalone Zenoh SDK can supply communication independently
+of the existing LeRobot model runtime. Keep the network-facing communication bridge separate
+from the offline GPU worker and reuse the original ROBOTIS controllers on the robot.
+
+The local [reference profile](../profiles/robotis_bg2_rev4.reference.json) records camera topics,
+command topics, 19 named joint limits from a reference URDF, source hashes, and middleware
+settings. It explicitly disables execution and marks live compatibility as unverified.
+It is reference data, not a running controller bridge. The source config maps the right head,
+left wrist, and right wrist to the required training camera labels.
+
 ## Information still needed
 
-- The matching `bg2_cosmos/model.py` and `bg2_cosmos/data.py`, or a self-contained inference
-  adapter. The full optimizer and training loop are not required.
-- The custom embodiment ID and exact native inference batch/mask schema. The DCP metadata
-  has 34 embodiment slots but does not identify which slot RobotEscape used.
-- A verified conversion from model output to the eight physical joint targets, with
-  normalization applied exactly as training requires.
-- The deployed robot's controller configuration, middleware/domain/router settings, and
-  camera topics, resolutions, frame selection, and timestamps.
-- Validation that the chosen lift/head pose and camera preprocessing remain compatible with
-  training. Changing those poses changes the images the policy receives.
+- Actual robot-side bringup revision, selected initial-position YAML, active controllers,
+  namespaces, limits, and command ownership. The reference URDF does not establish installed limits.
+- Fresh live camera resolutions, frame timestamps, and rotation conventions. The reference
+  config specifies 270-degree wrist rotation, but the exact transformation from live images
+  into the MP4 frames used by training remains unverified. Do not apply that rotation blindly.
+- Confirm all three streams: `cam_right_head`, `cam_right_wrist`, and `cam_left_wrist`.
+  One existing policy deployment config includes only right head and right wrist. Cosmos needs both wrists.
+- Validate the chosen lift/head pose against the training camera pose and benchmark the persistent
+  worker on the inference PC. The current first-call generation timings exceed the 0.8-second horizon.
 
-The training camera labels are `cam_right_head`, `cam_right_wrist`, and `cam_left_wrist`.
-Do not assume the standard SDK's camera presets select those same streams. The head crop in
-the contract extends to pixel x=672, so an assumed 640-pixel input width would be incompatible.
+The training head crop extends to pixel x=672. An assumed 640-pixel source width would be
+incompatible. The live observation adapter must reproduce the original PIL bilinear crop/resize
+and head letterboxing after establishing the source orientation.
 
 ## Next implementation work
 
-First finish the [inference pipeline implementation plan](inference_pipeline_plan.md), so
-the command path consumes verified model outputs.
+Use the verified output decoder from the [inference pipeline implementation plan](inference_pipeline_plan.md).
+Continue local implementation while keeping `3sp5090` read-only.
 
 1. Add configurable startup/hold coordination with states for initialization, settling,
    capture, ready, running, and failure. Test it against mocked feedback/controllers.
-2. Add the observation adapter and persistent inference interface after reviewing the
-   matching training adapter.
+2. Add the live observation adapter after verifying camera orientation, and add a persistent
+   inference interface using the already integrated training adapter.
 3. Add an offline trajectory builder and inspector that validate joint names, shapes, units,
    timestamps, finite values, limits, and target changes before constructing commands.
-4. Verify recorded-sample inference and benchmark latency on the inference PC.
+4. Benchmark warmed repeated inference and choose timestamp handling and execution cadence.
 5. Verify live feedback and controller ownership before exercising the complete command path.
 
 ## Source references

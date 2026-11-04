@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/ROBOTIS-GIT/zenoh_ros2_sdk.git",
+  "commit": "be2c4d4595305a9c282fca09820a8b3bfb8076a3",
+  "tree": "f00648a1edb8851fcf8c0574dbe7021fe5d8aa1a",
+  "source": "Exact Git revision read from both inspected 3sp5090 SDK checkouts",
+  "version": "0.1.8"
+}

@@ -1,0 +1,285 @@
+{
+  "schema": 1,
+  "robot": "ffw_bg2_rev4",
+  "status": "reference_only_not_verified_on_robot",
+  "execution_enabled": false,
+  "middleware": {
+    "ros_distro": "jazzy",
+    "rmw_implementation": "rmw_zenoh_cpp",
+    "domain_id": 30,
+    "configured_router_host": "192.168.0.14",
+    "configured_router_port": 7447,
+    "connectivity_verified": false
+  },
+  "joint_feedback": {
+    "topic": "/joint_states",
+    "msg_type": "sensor_msgs/msg/JointState"
+  },
+  "cameras": {
+    "head": {
+      "training_label": "cam_right_head",
+      "topic": "/zed/zed_node/right/image_rect_color/compressed",
+      "msg_type": "sensor_msgs/msg/CompressedImage",
+      "reference_config_rotation_deg": 0,
+      "live_to_training_rotation_deg": null,
+      "crop_xyxy": [
+        128,
+        0,
+        672,
+        376
+      ],
+      "output_wh": [
+        512,
+        384
+      ],
+      "raw_dimensions_verified": false
+    },
+    "wrist": {
+      "training_label": "cam_right_wrist",
+      "topic": "/camera_right/camera_right/color/image_rect_raw/compressed",
+      "msg_type": "sensor_msgs/msg/CompressedImage",
+      "reference_config_rotation_deg": 270,
+      "live_to_training_rotation_deg": null,
+      "crop_xyxy": [
+        0,
+        184,
+        240,
+        424
+      ],
+      "output_wh": [
+        256,
+        256
+      ],
+      "raw_dimensions_verified": false
+    },
+    "wrist_left": {
+      "training_label": "cam_left_wrist",
+      "topic": "/camera_left/camera_left/color/image_rect_raw/compressed",
+      "msg_type": "sensor_msgs/msg/CompressedImage",
+      "reference_config_rotation_deg": 270,
+      "live_to_training_rotation_deg": null,
+      "crop_xyxy": [
+        0,
+        184,
+        240,
+        424
+      ],
+      "output_wh": [
+        256,
+        256
+      ],
+      "raw_dimensions_verified": false
+    }
+  },
+  "commands": {
+    "arm_left": {
+      "topic": "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory",
+      "msg_type": "trajectory_msgs/msg/JointTrajectory",
+      "joint_names": [
+        "arm_l_joint1",
+        "arm_l_joint2",
+        "arm_l_joint3",
+        "arm_l_joint4",
+        "arm_l_joint5",
+        "arm_l_joint6",
+        "arm_l_joint7",
+        "gripper_l_joint1"
+      ]
+    },
+    "arm_right": {
+      "topic": "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory",
+      "msg_type": "trajectory_msgs/msg/JointTrajectory",
+      "joint_names": [
+        "arm_r_joint1",
+        "arm_r_joint2",
+        "arm_r_joint3",
+        "arm_r_joint4",
+        "arm_r_joint5",
+        "arm_r_joint6",
+        "arm_r_joint7",
+        "gripper_r_joint1"
+      ]
+    },
+    "head": {
+      "topic": "/leader/joystick_controller_left/joint_trajectory",
+      "msg_type": "trajectory_msgs/msg/JointTrajectory",
+      "joint_names": [
+        "head_joint1",
+        "head_joint2"
+      ]
+    },
+    "lift": {
+      "topic": "/leader/joystick_controller_right/joint_trajectory",
+      "msg_type": "trajectory_msgs/msg/JointTrajectory",
+      "joint_names": [
+        "lift_joint"
+      ]
+    }
+  },
+  "hold_groups": [
+    "arm_left",
+    "head",
+    "lift"
+  ],
+  "hold_capture": "measured positions after successful homing and settling; fixed for session",
+  "policy": {
+    "joint_names": [
+      "arm_r_joint1",
+      "arm_r_joint2",
+      "arm_r_joint3",
+      "arm_r_joint4",
+      "arm_r_joint5",
+      "arm_r_joint6",
+      "arm_r_joint7",
+      "gripper_r_joint1"
+    ],
+    "future_steps": 16,
+    "frame_interval_ns": 50000000
+  },
+  "reference_limits": {
+    "lift_joint": {
+      "type": "prismatic",
+      "effort": 1000.0,
+      "lower": -0.5,
+      "upper": 0.0,
+      "velocity": 4.8
+    },
+    "head_joint1": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -0.2317,
+      "upper": 0.6951,
+      "velocity": 4.8
+    },
+    "head_joint2": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -0.35,
+      "upper": 0.35,
+      "velocity": 4.8
+    },
+    "arm_l_joint1": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_l_joint2": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": 0.0,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_l_joint3": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_l_joint4": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -2.9361,
+      "upper": 1.0786,
+      "velocity": 4.8
+    },
+    "arm_l_joint5": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_l_joint6": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -1.57,
+      "upper": 1.57,
+      "velocity": 4.8
+    },
+    "arm_l_joint7": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -1.8201,
+      "upper": 1.5804,
+      "velocity": 4.8
+    },
+    "arm_r_joint1": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_r_joint2": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 0.0,
+      "velocity": 4.8
+    },
+    "arm_r_joint3": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_r_joint4": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -2.9361,
+      "upper": 1.0786,
+      "velocity": 4.8
+    },
+    "arm_r_joint5": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -3.14,
+      "upper": 3.14,
+      "velocity": 4.8
+    },
+    "arm_r_joint6": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -1.57,
+      "upper": 1.57,
+      "velocity": 4.8
+    },
+    "arm_r_joint7": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": -1.5804,
+      "upper": 1.8201,
+      "velocity": 4.8
+    },
+    "gripper_l_joint1": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": 0.0,
+      "upper": 1.1,
+      "velocity": 6.5
+    },
+    "gripper_r_joint1": {
+      "type": "revolute",
+      "effort": 1000.0,
+      "lower": 0.0,
+      "upper": 1.1,
+      "velocity": 6.5
+    }
+  },
+  "evidence": {
+    "machine": "3sp5090",
+    "inspection_date": "2026-11-04",
+    "inspection_mode": "files_and_container_metadata_only",
+    "robot_config_source": "/home/sangjunpark/dev/cyclo_intelligence/shared/shared/robot_configs/ffw_bg2_rev4_config.yaml",
+    "robot_config_sha256": "ac30eb71a3910c9a8fe3d6cb1216e498141672038d70ae0b7665d4a4dbcbc74b",
+    "reference_urdf_source": "/home/sangjunpark/dev/cyclo_intelligence/shared/shared/robot_configs/urdf/ffw_bg2_rev4_follower.urdf",
+    "reference_urdf_sha256": "d28dca9d38bb80489aab4767d01ccedd0db6dbeb8d98025a99a8fcba17b300f7",
+    "zenoh_sdk_commit": "be2c4d4595305a9c282fca09820a8b3bfb8076a3",
+    "remote_modifications": false
+  }
+}
