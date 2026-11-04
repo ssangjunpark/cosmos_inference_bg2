@@ -13,6 +13,28 @@ sys.path.insert(0, str(SCRIPTS))
 import cosmos3
 
 
+@unittest.skipUnless((cosmos3.UPSTREAM / "docker/write_image_provenance.py").is_file(), "Framework submodule unavailable")
+class BuildProvenanceTests(unittest.TestCase):
+    def test_wrapper_metadata_satisfies_the_upstream_build_validator(self):
+        import os
+        import runpy
+        from datetime import datetime
+        from unittest import mock
+
+        validator = runpy.run_path(str(cosmos3.UPSTREAM / "docker/write_image_provenance.py"))["_source_provenance"]
+        with mock.patch.object(cosmos3, "checked") as execute:
+            cosmos3.build(dry_run=True)
+        command = execute.call_args_list[0].args[0]
+        build_args = dict(command[i + 1].split("=", 1) for i, item in enumerate(command[:-1]) if item == "--build-arg")
+        with mock.patch.dict(os.environ, build_args):
+            source = validator()
+        self.assertTrue(source["verified"])
+        self.assertFalse(source["dirty"])
+        self.assertEqual(source["commit"], cosmos3.REVISION)
+        self.assertEqual(len(source["tree"]), 40)
+        self.assertIsNotNone(datetime.fromisoformat(source["build_timestamp"].replace("Z", "+00:00")).tzinfo)
+
+
 class CheckpointTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

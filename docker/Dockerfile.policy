@@ -2,3 +2,5 @@
 ARG FRAMEWORK_IMAGE=cosmos-framework:robotescape-b98934e
 FROM ${FRAMEWORK_IMAGE}
 RUN uv sync --all-extras --group=cu130-torch213-train --group=policy-server
+# Refresh runtime package versions after changing the dependency group.
+RUN /workspace/.venv/bin/python /workspace/docker/write_image_provenance.py

@@ -79,9 +79,21 @@ def build(dry_run: bool) -> None:
     revision = subprocess.check_output(["git", "-C", str(UPSTREAM), "rev-parse", "HEAD"], text=True).strip()
     if revision != REVISION:
         raise ValueError(f"Framework revision mismatch: {revision}")
-    subprocess.run(["git", "-C", str(UPSTREAM), "diff", "--exit-code", "--quiet", "HEAD"], check=True)
+    dirty = subprocess.check_output(
+        ["git", "-C", str(UPSTREAM), "status", "--porcelain"], text=True,
+    ).strip()
+    if dirty:
+        raise ValueError("Framework checkout must be clean before claiming verified source provenance")
+    tree = subprocess.check_output(
+        ["git", "-C", str(UPSTREAM), "rev-parse", "HEAD^{tree}"], text=True,
+    ).strip()
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     checked(["docker", "build", "--build-arg", "INSTALL_APEX=0",
-             "--build-arg", f"SOURCE_COMMIT={REVISION}", "--build-arg", "SOURCE_DIRTY=0",
+             "--build-arg", f"SOURCE_COMMIT={revision}",
+             "--build-arg", f"SOURCE_TREE={tree}",
+             "--build-arg", f"BUILD_TIMESTAMP={timestamp}",
+             "--build-arg", "SOURCE_DIRTY=0",
+             "--build-arg", "REQUIRE_SOURCE_PROVENANCE=1",
              "-t", BASE_IMAGE, str(UPSTREAM)], dry_run)
     checked(["docker", "build", "--build-arg", f"FRAMEWORK_IMAGE={BASE_IMAGE}",
              "-f", str(ROOT / "docker/Dockerfile.policy"), "-t", POLICY_IMAGE,
@@ -179,15 +191,8 @@ def run(args: argparse.Namespace) -> None:
 
 def doctor(args: argparse.Namespace) -> None:
     command = container(args.gpu, ROOT / "outputs/doctor", args.dry_run)
-    code = (
-        "import torch, subprocess; "
-        "from cosmos_framework.utils.generator.torchcodec_dependencies import load_torchcodec; "
-        "torch.cuda.init(); x=torch.ones(1,device='cuda').add_(1); torch.cuda.synchronize(); "
-        "print('torch',torch.__version__,'CUDA',torch.version.cuda,'GPU',torch.cuda.get_device_name()); "
-        "print('TorchCodec',load_torchcodec().__version__); "
-        "subprocess.run(['ffmpeg','-version'],check=True)"
-    )
-    checked(command + [POLICY_IMAGE, "-c", code], args.dry_run)
+    checked(command + [POLICY_IMAGE, "/app/doctor_runtime.py", "--expected-commit", REVISION], args.dry_run)
+
 
 
 def main() -> int:

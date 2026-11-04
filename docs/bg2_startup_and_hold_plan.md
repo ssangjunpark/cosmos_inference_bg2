@@ -141,6 +141,9 @@ the contract extends to pixel x=672, so an assumed 640-pixel input width would b
 
 ## Next implementation work
 
+First finish the [inference pipeline implementation plan](inference_pipeline_plan.md), so
+the command path consumes verified model outputs.
+
 1. Add configurable startup/hold coordination with states for initialization, settling,
    capture, ready, running, and failure. Test it against mocked feedback/controllers.
 2. Add the observation adapter and persistent inference interface after reviewing the

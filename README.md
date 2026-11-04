@@ -9,6 +9,8 @@ The checkout in `third_party/cosmos-framework` is pinned to the framework commit
 checkpoint's `input_contract.json`: `b98934eda43f4d31972538a527f8663f003c27dc`.
 Upstream source is unchanged; the root scripts contain the local integration.
 
+Remaining inference work is tracked in the [inference pipeline implementation plan](docs/inference_pipeline_plan.md).
+
 The planned physical-robot startup, configurable homing, and left-arm/lift hold behavior are
 recorded in the [BG2 startup and inference hold plan](docs/bg2_startup_and_hold_plan.md).
 
@@ -127,8 +129,9 @@ are mounted read-only. For a Hugging Face tokenizer snapshot, its model cache re
 mounted read-only to preserve links into the adjacent blobs directory. Writable bind mounts are restricted to this workspace's `.runtime/cache/`
 and the fresh output directory. The container does not mount the Docker socket, host home,
 serial devices, or robot services. Shared memory uses `--shm-size=16g`, not host IPC.
-The upstream entrypoint is bypassed at inference because it attempts an editable install;
-the environment was already installed during the image build.
+Runtime launches the image's Python directly; the environment is installed during the image build.
+The build wrapper supplies the complete source provenance required by the pinned Dockerfile.
+The runtime check validates image identity, CUDA arithmetic, and actual video decoding.
 
 The launcher requires publication markers and checks shard presence and sizes. To recompute
 the original SHA-256 digests as well, run `python3 scripts/cosmos3.py status --sha256`.
