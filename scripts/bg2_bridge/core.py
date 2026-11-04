@@ -83,8 +83,8 @@ def validate_profile(profile, *, live=False, execute=False):
             require(camera.get("raw_dimensions_verified") is True and isinstance(wh, list) and len(wh) == 2 and
                     all(isinstance(v, int) and v > 0 for v in wh), f"{key}: verify raw_wh first")
     if execute:
-        require(profile.get("execution_enabled") is True and profile.get("status") == "verified_on_robot",
-                "Execution requires a verified deployment profile; reference profiles cannot command hardware")
+        require(profile.get("execution_enabled") is True and profile.get("status") in ("verified_on_robot", "operator_enabled_for_execution"),
+                "Execution requires an explicitly enabled deployment profile; reference profiles cannot command hardware")
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,162 @@
+# Normal policy inference with robot movement
+
+Prepared 2026-11-05 KST. The operator authorized normal execution and an upper-limit
+override of head_joint1 from 0.6951 to 0.78 radians for the existing SNUPI home.
+Only the separate `profile.execute.json` contains this override. The ROBOTIS model,
+SNUPI YAML, reference profile and debug profile are unchanged. The execution profile
+is marked `operator_enabled_for_execution`, not physically commissioned. The policy
+predicts only right arm/gripper; the companion still publishes measured startup
+holds for the left arm/gripper, head and elevator. Keep the independent robot stop
+available for this first moving run; physical tracking and stopping remain untested.
+
+The gateway on 5090 is updated without starting it. A small FFW bundle is staged on
+5090 at `~/cosmos_ffw_companion.tar.gz`. FFW itself has not been modified by our tools.
+The operator performs the copy/start commands below. No Docker build or download is
+needed on FFW; it reuses the installed `robotis/ai-worker:2.2.8` image.
+
+## 1. Stop any previous follower launch
+
+Use Ctrl+C in its original FFW launch terminal. Leave the existing ai_worker container
+running. Do not launch two followers, or run VR/teleoperation alongside the companion.
+
+## 2. PRO 6000: restart the model to load the gripper floor
+
+```bash
+cd /home/sangjunpark/Documents/cosmos_inference_bg2
+docker stop --timeout 20 cosmos-bg2-edge-server
+python3 scripts/cosmos3.py serve \
+  --variant edge --step 20000 --gpu 5 --image base \
+  --tokenizer assets/nvidia--Cosmos3-Edge-344d602b128d1bbdacb43b08d0a3626f46343e29 \
+  --vae assets/Wan-AI--Wan2.2-TI2V-5B-921dbaf3f1674a56f47e83fb80a34bac8a8f203e/Wan2.2_VAE.pth \
+  --warmup-observation inputs/recorded_observation.npz \
+  --warmup-runs 3 --guidance-interval 960 1001
+```
+
+Wait for `event: ready`; keep this terminal open. The server uses policy mode,
+no imagined future video, and floors only negative predicted right-gripper values to 0.
+
+## 3. PRO 6000: open the tunnel in another terminal
+
+The last check found the 5090 port closed. Open one tunnel, originating on PRO 6000:
+
+```bash
+ssh -N -T -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -R 127.0.0.1:18008:127.0.0.1:8008 3sp5090
+```
+
+Keep it open. If a working tunnel already occupies 18008, reuse it instead of starting
+another. Verify on 5090 with `curl --fail http://127.0.0.1:18008/health`.
+
+## 4. 5090: copy the prepared FFW archive, once
+
+```bash
+scp ~/cosmos_ffw_companion.tar.gz ffw:~/
+ssh ffw
+mkdir -p ~/cosmos_ffw_companion
+tar -xzf ~/cosmos_ffw_companion.tar.gz -C ~/cosmos_ffw_companion
+cd ~/cosmos_ffw_companion
+python3 verify_bundle.py
+```
+
+The following commands are on FFW. Validate files without opening ROS or publishing:
+
+```bash
+FFW_PROFILE=./config/profile.execute.json COSMOS_MODE=execute \
+  docker compose run --rm --no-deps companion \
+  --profile /config/profile.json \
+  --initial-positions /config/initial_positions.yaml --mode execute --check
+```
+
+Proceed only when it reports `valid: true`. Start the companion **before fresh homing**:
+
+```bash
+FFW_PROFILE=./config/profile.execute.json COSMOS_MODE=execute \
+  docker compose up --no-build --pull never
+```
+
+Keep this terminal open. It initially waits for ROBOTIS homing.
+
+## 5. FFW: start the follower with fresh SNUPI homing
+
+In another terminal, connect from 5090 with `ssh ffw`, then:
+
+```bash
+docker exec -it ai_worker bash
+```
+
+Inside the existing container:
+
+```bash
+ros2 launch ffw_bringup ffw_bg2_follower_ai.launch.py \
+  launch_cameras:=true \
+  init_position:=true \
+  init_position_file:=bg2_vr_startup_snupi.yaml \
+  use_head_eef_tracker:=false
+```
+
+This homing moves both arms, head and lift. Keep the terminal open. Wait for homing,
+settling and all three cameras. In a second ai_worker shell, inspect companion status:
+
+```bash
+ros2 topic echo /cosmos/bg2/status --field data
+```
+
+Wait for `mode: execute`, `needs_chunk: true` and phase `ready` or `holding`.
+A fault, absent status or competing publisher is a reason to stop and inspect the
+reported error, not bypass the gate. Ctrl+C stops only the status display.
+
+## 6. 5090: start normal inference last
+
+```bash
+cd ~/cosmos_bg2_gateway
+curl --fail http://127.0.0.1:18008/health
+COSMOS_PROFILE=./config/profile.execute.json \
+  docker compose run --rm --no-deps --name cosmos-bg2-execute gateway \
+  execute \
+  --profile /config/profile.json \
+  --messages-dir /opt/cosmos_gateway/messages \
+  --server-url http://127.0.0.1:18008 \
+  --instruction "Pick up the police car and place it on the top-right picture" \
+  --output "/output/execute-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+There is no `--debug`: this command enables policy-driven movement after FFW readiness.
+Each cycle captures current measured state/images, infers while holding, executes all
+16 targets over 0.8 seconds, then holds the final command before requesting again.
+The loop does not detect semantic task completion; the operator stops it. Camera videos,
+exact input frames and chunks are saved under the 5090 `logs/execute-*/` directory;
+model artifacts stay on PRO 6000 under `outputs/server-edge/requests/`.
+
+## 7. Stop and restart
+
+Press Ctrl+C in the 5090 inference terminal. It requests a software stop/hold through
+the companion; this is not torque disable or an independent emergency stop. Use the
+robot's independent stop for urgent stopping. Then, on FFW, stop only our companion:
+
+```bash
+cd ~/cosmos_ffw_companion
+docker compose down --timeout 3
+```
+
+The separately managed ROBOTIS follower remains running until stopped in its own
+terminal. After a stop/fault, restart the companion and perform fresh homing before
+starting a new inference run. No homing occurs between ordinary chunks.
+
+The existing 2 rad/s, 10-degree tracking, position, freshness and controller/ownership
+checks remain. The head override changes only the companion's accepted head range.
+
+## Recreate the execution profile later
+
+On PRO 6000, use a copy of the verified sensor profile as input:
+
+```bash
+python3 scripts/prepare_execution_profile.py \
+  --source PATH_TO_VERIFIED_SENSOR_PROFILE.json \
+  --output PATH_TO_NEW_EXECUTION_PROFILE.json \
+  --snupi-head-override
+```
+
+The output is exclusive: existing profiles are not overwritten. This command opens
+no robot connection. Disabling/removing this separate profile restores the default
+execution-disabled reference/debug behavior; no ROBOTIS model edits need reverting.

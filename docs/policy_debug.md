@@ -14,6 +14,8 @@ companion. It subscribes only to live sensors, creates no chunk/control publishe
 and never sends hardware commands. It retains the normal freshness/alignment and
 verified-camera-transform requirements. `execution_enabled` can remain false.
 
+For robot movement, follow the separate [normal execution guide](policy_execution.md).
+
 ## PRO 6000
 
 Start the model and tunnel using the commands in

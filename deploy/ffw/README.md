@@ -80,7 +80,9 @@ Zenoh router is reused. This container does not start ROBOTIS or homing.
 
 The selected SNUPI file is `bg2_vr_startup_snupi.yaml`. Its head_joint1 target 0.78 exceeds
 the installed Rev4 upper limit 0.6951, so current validation rejects it. The YAML and
-limits remain unchanged. Resolve that mismatch before startup. The reference profile
+limits remain unchanged. The operator-approved separate execution profile permits head_joint1 up to 0.78;
+the ROBOTIS model and reference limits are not edited. See `docs/policy_execution.md`
+in the main repository. Without that override, resolve the mismatch before startup. The reference profile
 also remains unverified with execution disabled.
 
 ## Restart, rollback and validation boundary

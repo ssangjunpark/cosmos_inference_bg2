@@ -111,6 +111,33 @@ class HomingTests(unittest.TestCase):
         self.assertIsNone(startup.hold)
         self.assertEqual(startup.phase, "settling")
 
+    def test_operator_head_override_preserves_other_limits_and_captured_hold(self):
+        from prepare_execution_profile import prepare
+        from bg2_bridge.core import check_positions
+        p = profile()
+        for key, camera in p['cameras'].items():
+            camera.update(raw_dimensions_verified=True, raw_wh=[672,376] if key=='head' else [424,240],
+                          live_to_training_rotation_deg=0 if key=='head' else 90)
+        overridden = prepare(p, snupi_head_override=True)
+        validate_profile(overridden, live=True, execute=True)
+        self.assertEqual(overridden['status'], 'operator_enabled_for_execution')
+        self.assertEqual(overridden['reference_limits']['head_joint1']['upper'], .78)
+        self.assertEqual(p['reference_limits']['head_joint1']['upper'], .6951)
+        for name, limit in p['reference_limits'].items():
+            if name != 'head_joint1':self.assertEqual(overridden['reference_limits'][name],limit)
+        check_positions(['head_joint1'], [.78], overridden)
+        with self.assertRaises(BridgeError):check_positions(['head_joint1'], [.7801], overridden)
+        startup, frame = ready(p=overridden, custom={'head_joint1': .78})
+        engine = ChunkExecutor(startup)
+        commands = engine.tick(frame, frame.source_ns)
+        self.assertEqual(commands['head']['message']['points'][0]['positions'][0], .78)
+
+    def test_execution_profile_still_requires_verified_cameras_and_explicit_enable(self):
+        from prepare_execution_profile import prepare
+        with self.assertRaises(BridgeError):prepare(profile(), snupi_head_override=True)
+        p = profile();p['status'] = 'operator_enabled_for_execution'
+        with self.assertRaises(BridgeError):validate_profile(p, execute=True)
+
     def test_reference_profile_cannot_enable_execution(self):
         with self.assertRaises(BridgeError):
             validate_profile(profile(), execute=True)
