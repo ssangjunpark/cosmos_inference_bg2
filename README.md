@@ -9,6 +9,9 @@ The checkout in `third_party/cosmos-framework` is pinned to the framework commit
 checkpoint's `input_contract.json`: `b98934eda43f4d31972538a527f8663f003c27dc`.
 Upstream source is unchanged; the root scripts contain the local integration.
 
+The planned physical-robot startup, configurable homing, and left-arm/lift hold behavior are
+recorded in the [BG2 startup and inference hold plan](docs/bg2_startup_and_hold_plan.md).
+
 ## Clone
 
 Clone this repository with its pinned Cosmos Framework submodule:
