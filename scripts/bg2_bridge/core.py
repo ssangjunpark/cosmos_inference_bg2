@@ -18,6 +18,24 @@ class BridgeError(ValueError):
     pass
 
 
+class SafetyStop(BridgeError):
+    """A motion-limit violation that must latch the session in fault."""
+
+
+MAX_ANGULAR_VELOCITY = 2.0  # rad/s, explicitly requested by the operator
+MAX_ANGULAR_ERROR = math.radians(10)
+
+
+def angular_names(profile):
+    return [n for n in all_names(profile)
+            if profile["reference_limits"][n]["type"] in ("revolute", "continuous")]
+
+
+def safety_require(condition, message):
+    if not condition:
+        raise SafetyStop(message)
+
+
 def require(condition, message):
     if not condition:
         raise BridgeError(message)
@@ -212,48 +230,45 @@ def message(names, rows, offsets, start_ns):
                         "time_from_start": ros_time(offset)} for row, offset in zip(rows, offsets)]}
 
 
-def trajectories(prediction, feedback, startup, now_ns, *, lead_ns=20_000_000, velocity_scale=0.25,
-                 tracking_tolerance=0.1, prefix=16):
-    require(startup.phase in ("ready", "running", "holding") and startup.hold is not None, "Initialization and hold capture are incomplete")
+def trajectories(prediction, feedback, startup, now_ns, *, held_command=None):
+    """Send all 16 unchanged predictions at 50..800 ms from execution start."""
+    require(startup.phase in ("ready", "holding") and startup.hold is not None,
+            "A full chunk can start only while holding after initialization")
     feedback.fresh(now_ns)
     require(prediction.get("epoch") == startup.epoch, "Prediction belongs to another initialization session")
     require(prediction.get("joint_names") == startup.profile["policy"]["joint_names"], "Prediction joint order mismatch")
     require(prediction.get("units") == ["rad"] * 8, "Expected recorded radian joint coordinates")
     values = np.asarray(prediction["positions"], dtype=np.float64)
-    require(values.shape == (16, 8) and np.isfinite(values).all(), "Expected finite 16-by-8 predictions")
-    require(0 < velocity_scale <= 1 and 1 <= prefix <= 16 and lead_ns >= 0, "Invalid trajectory settings")
-    source = int(prediction["source_time_ns"])
-    require(0 <= now_ns - source, "Prediction is from the future; check clocks")
-    start = now_ns + lead_ns
-    future = [(i, source + (i + 1) * 50_000_000 - start) for i in range(16)
-              if source + (i + 1) * 50_000_000 - start >= 50_000_000][:prefix]
-    require(bool(future), "Prediction horizon expired; do not retimestamp old predictions")
+    safety_require(values.shape == (16, 8) and np.isfinite(values).all(), "Expected finite 16-by-8 predictions")
+    source = prediction.get("source_time_ns")
+    require(type(source) is int and 0 < source <= now_ns, "Invalid/future observation timestamp")
     right = startup.profile["commands"]["arm_right"]["joint_names"]
     for row in values:
-        check_positions(right, row, startup.profile)
-    offsets = [0] + [offset for _, offset in future]
-    right_rows = [[feedback.positions[n] for n in right]] + [values[i].tolist() for i, _ in future]
-    check_positions(right, right_rows[0], startup.profile)
-    for previous, row, before, after in zip(right_rows, right_rows[1:], offsets, offsets[1:]):
-        speeds = np.abs(np.subtract(row, previous)) / ((after - before) / 1e9)
-        require(all(speed <= startup.profile["reference_limits"][n]["velocity"] * velocity_scale for n, speed in zip(right, speeds)),
-                "Predicted motion exceeds configured velocity limits")
+        try:
+            check_positions(right, row, startup.profile)
+        except BridgeError as error:
+            raise SafetyStop(str(error)) from error
+    previous = np.asarray([feedback.positions[n] for n in right])
+    if held_command is not None:
+        safety_require(np.all(np.abs(values[0] - np.asarray([held_command[n] for n in right])) / .05 <= MAX_ANGULAR_VELOCITY + 1e-9),
+                       "Commanded angular velocity exceeds 2 rad/s from the preceding hold")
+    for row in values:
+        safety_require(np.all(np.abs(row - previous) / .05 <= MAX_ANGULAR_VELOCITY + 1e-9),
+                       "Commanded angular velocity exceeds 2 rad/s")
+        previous = row
+    offsets = [(i + 1) * 50_000_000 for i in range(16)]
     result = {}
     for group in GROUPS:
         spec = startup.profile["commands"][group]
         names = spec["joint_names"]
-        if group == "arm_right":
-            rows = right_rows
-        else:
-            captured = [startup.hold[n] for n in names]
-            require(all(abs(feedback.positions[n] - startup.hold[n]) <= tracking_tolerance for n in names), "Held group drifted")
-            check_positions(names, captured, startup.profile)
-            rows = [captured for _ in offsets]
-        result[group] = {"topic": spec["topic"], "message": message(names, rows, offsets, start)}
+        rows = values.tolist() if group == "arm_right" else [[startup.hold[n] for n in names] for _ in offsets]
+        check_positions(names, rows[0], startup.profile)
+        result[group] = {"topic": spec["topic"], "message": message(names, rows, offsets, now_ns)}
     return result
 
 
-def hold_messages(feedback, startup, now_ns, *, include_right=False):
+def hold_messages(feedback, startup, now_ns, *, include_right=False, right_positions=None, stop_all=False):
+    """Normal holds preserve the commanded target; stop_all freezes fresh measured positions."""
     feedback.fresh(now_ns)
     require(startup.hold is not None, "Hold pose was not captured")
     result = {}
@@ -261,7 +276,13 @@ def hold_messages(feedback, startup, now_ns, *, include_right=False):
         if group == "arm_right" and not include_right:
             continue
         spec = startup.profile["commands"][group]
-        row = [feedback.positions[n] if group == "arm_right" else startup.hold[n] for n in spec["joint_names"]]
+        if stop_all:
+            row = [feedback.positions[n] for n in spec["joint_names"]]
+        elif group == "arm_right":
+            target = startup.hold if right_positions is None else right_positions
+            row = [target[n] for n in spec["joint_names"]]
+        else:
+            row = [startup.hold[n] for n in spec["joint_names"]]
         check_positions(spec["joint_names"], row, startup.profile)
         result[group] = {"topic": spec["topic"], "message": message(spec["joint_names"], [row], [100_000_000], now_ns)}
     return result

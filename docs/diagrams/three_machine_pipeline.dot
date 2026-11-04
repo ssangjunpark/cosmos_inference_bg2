@@ -19,10 +19,10 @@ digraph cosmos_bg2 {
       <TR><TD PORT="chunk" HEIGHT="230" ALIGN="LEFT" BGCOLOR="white">
         <B>cosmos_ffw/node.py</B><BR/><BR ALIGN="LEFT"/>
         core.py: homing, settling, captured holds<BR ALIGN="LEFT"/>
-        chunks.py: validate / replace / expire<BR ALIGN="LEFT"/>
+        chunks.py: execute 16 / hold final / acknowledge<BR ALIGN="LEFT"/>
         ros_messages.py: build JointTrajectory<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
-        Check session, age, bounds, velocity,<BR ALIGN="LEFT"/>
-        feedback and controller ownership<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Check session/cycle, bounds, 2 rad/s,<BR ALIGN="LEFT"/>
+        10 degree tracking, feedback and ownership<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
         Left arm, head, elevator: fixed home holds<BR ALIGN="LEFT"/>
       </TD></TR>
       <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Companion status</B><BR ALIGN="LEFT"/>Session ID, readiness, remaining horizon<BR ALIGN="LEFT"/>Accept stop on /cosmos/bg2/control<BR ALIGN="LEFT"/></TD></TR>
@@ -49,13 +49,13 @@ digraph cosmos_bg2 {
       <TR><TD PORT="chunk" HEIGHT="230" ALIGN="LEFT" BGCOLOR="white">
         <B>bg2_bridge/gateway.py</B><BR/><BR ALIGN="LEFT"/>
         Forward the whole JSON chunk to FFW<BR ALIGN="LEFT"/>
-        Discard stale / old-session results<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
-        <B>chunks.py / RequestPlanner</B><BR ALIGN="LEFT"/>
-        One inference request in flight<BR ALIGN="LEFT"/>
-        Request newest observations before expiry<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        Wait for the preceding chunk to finish<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
+        <B>Synchronous request cycle</B><BR ALIGN="LEFT"/>
+        One blocking request while FFW holds<BR ALIGN="LEFT"/>
+        New measured inputs after the final hold<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>
         CPU process; no motor-command publishers<BR ALIGN="LEFT"/>
       </TD></TR>
-      <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Use fresh FFW status</B><BR ALIGN="LEFT"/>Matching preview/execute mode + session<BR ALIGN="LEFT"/>Explicit stop goes back to FFW<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Use fresh FFW status</B><BR ALIGN="LEFT"/>Matching mode, session and completed cycle<BR ALIGN="LEFT"/>Explicit stop goes back to FFW<BR ALIGN="LEFT"/></TD></TR>
       <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
         <B>Forwarded listener on this PC</B><BR/><BR ALIGN="LEFT"/>
         Tunnel endpoint: 127.0.0.1:18008<BR ALIGN="LEFT"/>
@@ -88,8 +88,8 @@ digraph cosmos_bg2 {
       <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
         <B>Timing contract</B><BR/><BR ALIGN="LEFT"/>
         16 waypoints x 50 ms = 0.8 s horizon<BR ALIGN="LEFT"/>
-        Horizon starts at the robot observation<BR ALIGN="LEFT"/>
-        Expired predictions are never retimed<BR ALIGN="LEFT"/>
+        Execution starts after inference returns<BR ALIGN="LEFT"/>
+        All 16 targets retained; no output rescaling<BR ALIGN="LEFT"/>
       </TD></TR>
     </TABLE>
   >];

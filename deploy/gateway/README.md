@@ -45,8 +45,14 @@ Modes:
   execute-mode FFW session. The FFW still applies all local runtime gates.
 - `replay`: recorded observation to the HTTP service only; never opens a Zenoh session.
 
-Gateway/companion modes must match. A stale status, new homing epoch, late result, or
-missing observation blocks forwarding. One request runs at a time, using the newest
-aligned observations. The FFW keeps original action deadlines, replaces remaining
-trajectory points, and holds when a chunk ends. The 5090's clock measures elapsed time;
-its wall clock and the PRO 6000 wall clock never replace robot observation timestamps.
+Gateway/companion modes must match. The gateway makes a blocking inference request only
+after FFW has completed its preceding trajectory and established the final-command hold.
+It captures measured joints and three camera frames at or after `ready_since_ns`; it never
+uses a previous prediction as the current state. It forwards all 16 unchanged targets.
+
+No prefetch or request during motion remains. After forwarding, even an old ready status
+cannot trigger another request: FFW must acknowledge the matching completed request/cycle.
+The updated companion uses status schema `cosmos_bg2_status_v2` and execution contract
+`synchronous_full_chunk_v1`. Update both copies together; old async copies are incompatible.
+The output-only model RPC remains unchanged. See the synchronous execution contract in
+the main repository for stop limits and completion semantics.

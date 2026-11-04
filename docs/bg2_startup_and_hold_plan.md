@@ -92,15 +92,17 @@ orientation, controller configuration, hardware limits, observation age, and exe
 still need validation before publishing commands. Preserve the recorded joint coordinates
 and gripper values.
 
-Warm Edge/Nano HTTP latency is now measured on PRO 6000 in the runbook. Verify real
-network and robot timing during commissioning before selecting the execution prefix,
-trajectory timestamps, buffering, and refresh cadence. Preserve observation timestamps;
-a prediction based on stale images cannot be treated as a fresh 0.8-second forecast.
-The robot continues moving during inference, unlike a simulation that pauses its clock.
+The user selected synchronous full-chunk execution: infer while holding, execute all
+16 targets at 50 ms spacing from execution start, hold the final commanded right target,
+and only then collect new measured state/images and request another chunk. The passive
+holds remain fixed. There is no request during motion, skipped prefix or active-tail
+replacement. See [the authoritative contract](synchronous_execution_20261104.md).
 
-Hold targets remain fixed even if the right arm replans. The controller may maintain its last
-target or require refreshes depending on its deployed configuration; a refresh must reuse the
-captured target rather than recapture the measured pose.
+Fresh homing after each companion restart and 500 ms settling are retained. Angular
+speed >2 rad/s or tracking error >10 degrees causes a terminal software stop; no
+angle-based threshold is assigned to the linear elevator. The former velocity multiplier
+and generic 0.1 tracking tolerance are removed. Initial/homing tolerances still come from
+the selected ROBOTIS YAML.
 
 For an explicit reinitialization, pause policy updates, finish the chosen initialization
 sequence, discard old observations and predictions, recapture hold targets, and reopen the

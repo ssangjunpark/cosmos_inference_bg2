@@ -63,7 +63,7 @@ class Observations:
         frame.fresh(now_ns)
         return frame
 
-    def snapshot(self, instruction, now_ns, *, receipt_now_ns=None):
+    def snapshot(self, instruction, now_ns, *, receipt_now_ns=None, not_before_ns=0):
         receipt_now_ns = now_ns if receipt_now_ns is None else receipt_now_ns
         validate_profile(self.profile, live=True)
         require(isinstance(instruction, str) and instruction.strip(), "Instruction is empty")
@@ -71,10 +71,14 @@ class Observations:
             require(self.error is None, f"Observation callback failed: {self.error}")
             require(self.joints and all(self.cameras.values()), "Waiting for all three cameras and joints")
             chosen = None
+            eligible = {key: [f for f in items if f[0] >= not_before_ns] for key, items in self.cameras.items()}
+            require(all(eligible.values()), "Waiting for camera frames captured after the hold")
             for joint in reversed(self.joints):
+                if joint.source_ns < not_before_ns:
+                    break
                 if now_ns - joint.source_ns > 100_000_000:
                     break
-                frames = {key: min(items, key=lambda f: (abs(f[0] - joint.source_ns), f[0])) for key, items in self.cameras.items()}
+                frames = {key: min(items, key=lambda f: (abs(f[0] - joint.source_ns), f[0])) for key, items in eligible.items()}
                 if all(abs(f[0] - joint.source_ns) <= 25_000_000 for f in frames.values()):
                     chosen = joint, frames
                     break

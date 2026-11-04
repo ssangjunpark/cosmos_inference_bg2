@@ -1,182 +1,100 @@
 # Cosmos FFW companion bundle
 
-Prepare this folder on the PRO 6000 server; transfer it to FFW only later. It adds a
-small companion alongside the existing ROBOTIS bringup. It contains no model weights,
-IK implementation, motor driver, or replacement for the existing 100 Hz controllers.
+This companion runs beside the existing ROBOTIS bringup. The model stays on PRO 6000;
+5090 handles observations and blocking inference requests. FFW uses native ROS to command
+its existing position JointTrajectoryControllers. No new motor driver or IK is included.
 
-## Prepare on PRO 6000
+## Prepare and transfer
 
-From the cosmos_inference_bg2 repository:
+On PRO 6000, run `python3 scripts/package_ffw.py --output transfer/ffw` with a new output
+folder. The builder copies shared modules, source templates, disabled reference profile
+and a checksum manifest. It never contacts either remote machine. Transfer only when
+requested. `deploy/ffw` is source; `transfer/ffw` is the complete generated folder.
 
-```bash
-python3 scripts/package_ffw.py --output transfer/ffw
-```
+## Synchronous behavior
 
-Send the generated `transfer/ffw/` folder when deployment is requested.
-`deploy/ffw/` is the source template; the packager adds shared core modules, a
-reference robot profile, and a SHA-256 manifest. Use a new output directory for later
-versions. The packager never connects to either remote machine.
+1. Start the companion before ROBOTIS homing. It observes fresh success for both arms,
+   head and elevator, checks 500 ms settling, captures measured holds, and publishes readiness.
+2. 5090 collects fresh measured joints and all three cameras after the hold timestamp.
+   PRO 6000 calculates one prediction while FFW holds.
+3. FFW sends all 16 unchanged right-arm/gripper targets at 50..800 ms from execution start.
+   The existing controllers interpolate them. Passive groups keep their captured targets.
+4. No request or active-chunk replacement occurs during execution. At the scheduled end,
+   FFW explicitly holds the last commanded target and acknowledges the completed cycle.
+5. Only then does 5090 collect a new observation and request the next chunk.
 
-## What runs where
+No prefetch planner, observation-based execution expiry, skipped prefix, extra 20 ms lead,
+measured-position waypoint or velocity multiplier remains. Model normalization/inversion
+matches training. Full details are in `docs/synchronous_execution_20261104.md` in the repo.
 
-| Machine | Role |
-| --- | --- |
-| PRO 6000 | Persistent Cosmos model worker. Return eight absolute joint positions for 16 future steps. |
-| 5090 | Align three camera views and measured right joints, issue asynchronous inference requests, forward returned chunks. |
-| FFW | This companion validates chunks and submits full timed trajectories to the existing JointTrajectoryControllers. ROBOTIS handles interpolation and motor control at 100 Hz. |
+## Stop limits
 
-The model's 20 Hz is waypoint spacing: 50 ms between predicted positions. It does
-not require sending inference requests or network packets at 20 Hz. A whole chunk
-is sent once. New chunks replace the unexecuted tail rather than joining a FIFO.
-The companion's 20 Hz timer monitors feedback, timing, and expiry; it is not another
-motor-control loop.
+Angular planned/measured velocity above **2 rad/s** or tracking error above **10 degrees**
+causes a terminal session fault and a best-effort fresh measured-position stop hold.
+The angle limits apply to angular joints, including the grippers and head, not the linear
+elevator. Position bounds and freshness/controller checks remain. Targets are never scaled,
+clipped or silently altered. The former quarter-speed rejection threshold is removed.
 
-## Chunk and request lifecycle
+The controller-manager loop is configured for 100 Hz; the companion timer is 20 Hz and
+execute-mode joint feedback callbacks also monitor the limits. Completion is the scheduled
+trajectory end plus final-hold publication, not proof of exact measured arrival. Preview
+validates predictions without publishing trajectories or checking unexecuted tracking.
 
-1. Start the companion before the externally managed ROBOTIS initialization sequence.
-   It does not start or restart the robot's bringup. It watches all four homing actions.
-2. After successful homing, require fresh, complete positions and velocities at the
-   selected YAML's final pose for a settling interval. Capture measured left-arm,
-   left-gripper, head, and lift positions once for this session.
-3. The companion publishes a session epoch and readiness on `/cosmos/bg2/status`.
-   In execute mode it also verifies active position controllers, claimed interfaces,
-   controller subscribers, and absence of other command publishers before sending holds.
-4. The 5090 obtains fresh observations, sends them to PRO 6000, and forwards a decoded
-   joint chunk to `/cosmos/bg2/chunk`. Only one request should be in flight; do not queue
-   old camera observations behind a busy model.
-5. FFW checks the session, request ID, original observation timestamp, joint order,
-   shape, units, limits, velocities, fresh feedback, and held-joint drift. It discards
-   elapsed rows. Fully expired chunks are rejected. It never restamps old predictions
-   as fresh predictions.
-6. FFW submits the remaining multi-point trajectory once. Controller interpolation
-   executes the 20 Hz waypoints in the existing 100 Hz control loop. Left/head/lift
-   targets remain the captured pose.
-7. While that trajectory runs, the 5090 requests the next prediction from the newest
-   observations, before the current forecast expires. `RequestPlanner` in `chunks.py`
-   implements the timing decision from a measured latency budget plus margin.
-8. If no fresh chunk arrives by the end, FFW sends a hold at the latest measured right
-   position and keeps the captured passive-group holds. It reports `holding`/`needs_chunk`.
-   A new valid chunk can resume a transiently starved session. It does not extrapolate.
+## Protocol
 
-A fresh chunk can replace an active chunk before its end. Frames and positions use
-FFW ROS timestamps end to end. PRO 6000 must echo the original timestamp; its wall
-clock must not manufacture new action timestamps. The gateway measures elapsed
-latency with its local monotonic clock; FFW is the final timestamp authority.
+All three messages use `std_msgs/msg/String` over the existing Zenoh router (domain 30,
+TCP 7447). No direct PRO 6000 connection is made by this companion.
 
-Example with an already warmed 100 ms round trip: observation at t=0 predicts through
-0.8 s. The first result arrives around 0.1 s. A new request at t=0.55 can arrive around
-0.65, replacing the remaining tail before 0.8. The exact lead time comes from measured
-latency, jitter, and command-delivery margin, not a fixed assumed model speed.
+- `/cosmos/bg2/chunk`: schema `cosmos_bg2_joint_chunk_v1`, execution contract
+  `synchronous_full_chunk_v1`, current epoch/cycle, unique request ID, original observation
+  timestamp, eight radian joint names/units, and exactly 16×8 absolute positions.
+- `/cosmos/bg2/status`: schema `cosmos_bg2_status_v2`, execution contract, epoch, phase,
+  integer cycle, `ready_since_ns`, `execution_end_ns`, remaining time, last submitted and
+  completed request IDs, readiness, mode, controller health and diagnostic reason.
+- `/cosmos/bg2/control`: schema `cosmos_bg2_control_v1`, current epoch, command `stop`.
 
-With observation request interval P and end-to-end latency L, continuous coverage
-requires P+L plus margin to fit inside the 0.8 s horizon. A serial one-in-flight worker
-also has P at least as large as its request latency. Cold recorded runs took about
-2.99 s (Edge) and 1.57 s (Nano). The persistent service now warms before listening;
-five local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano
-0.401 s median / 0.440 s max. Real network/robot timing and sustained jitter still
-need checking. See the [pipeline runbook](../../docs/three_machine_pipeline.md).
+Old async deployment copies fail this contract. Update the gateway and companion together.
+A missing chunk/completion acknowledgement leaves the gateway waiting, not requesting again.
 
-## Wire protocol
+## Run later on FFW
 
-Input: `/cosmos/bg2/chunk`, `std_msgs/msg/String`, UTF-8 JSON no larger than 128 KiB:
+Reuse the installed `robotis/ai-worker:2.2.8` image in a separate container. No build,
+package installation or image pull is needed. The existing ai_worker container is not
+edited or restarted. Our entrypoint bypasses inherited s6/bringup and starts only Python.
 
-- `schema`: `cosmos_bg2_joint_chunk_v1`.
-- `epoch`: the current FFW session epoch from status.
-- `request_id`: a unique 32-character lowercase hexadecimal ID.
-- `source_time_ns`: the original observed joint timestamp in the FFW ROS clock.
-- `joint_names`: arm_r_joint1 ... arm_r_joint7, gripper_r_joint1, in that order.
-- `units`: eight `rad` entries.
-- `positions`: 16 rows of eight absolute recorded joint positions. Row k is due at
-  source_time_ns + (k+1)*50,000,000 ns. Do not include the conditioned current row.
-
-Status: `/cosmos/bg2/status`, `std_msgs/msg/String`, schema `cosmos_bg2_status_v1`.
-It contains epoch, phase, robot_now_ns, remaining_ns, valid_until_ns, last request ID,
-mode, controller readiness, rejection reason, and count of physical command messages.
-The gateway must treat stale status as unavailable. Robot state and camera messages
-continue to come from the existing ROBOTIS nodes.
-
-Stop: `/cosmos/bg2/control`, `std_msgs/msg/String`, JSON with schema
-`cosmos_bg2_control_v1`, current epoch, and command `stop`. Stop holds the robot if
-feedback and ownership permit, then disarms this companion instance. Start a new
-companion session before a new homing sequence. No remote arm/resume command is provided.
-
-## Offline inspection and later deployment
-
-After an approved copy, these commands check files without opening a ROS connection:
+After the approved copy, from this generated folder:
 
 ```bash
 python3 verify_bundle.py
-python3 -B -m cosmos_ffw.node \
-  --profile config/profile.reference.json \
-  --initial-positions /path/to/the/actual/selected_initial_positions.yaml \
-  --check
-```
-
-For later deployment, reuse the **already installed** `robotis/ai-worker:2.2.8`
-image. There is no image build, package installation, or ROS/driver replacement.
-The companion runs in a separate small container from that same image; the existing
-`ai_worker` container and its bringup are not entered, edited, or restarted.
-
-The image is the installed software environment. The companion container is just a
-separate running process using that environment. Its entrypoint explicitly starts
-our Python companion instead of the image's normal s6/robot-bringup entrypoint.
-The inherited management-API healthcheck is disabled because that API is not started.
-Image pulling is disabled; a missing local image fails instead of downloading another
-version. A later deployment may set ROBOTIS_IMAGE to the verified installed image ID.
-
-From the **generated bundle** on FFW, after filling `.env` from `.env.example` and
-selecting the actual profile/home YAML, check the files without opening ROS:
-
-```bash
+cp .env.example .env
+# Configure the verified profile and exact ROBOTIS initial-position YAML in .env.
 docker compose run --rm companion \
   --profile /config/profile.json \
-  --initial-positions /config/initial_positions.yaml \
-  --check
-```
-
-Then start preview in the foreground:
-
-```bash
+  --initial-positions /config/initial_positions.yaml --check
 docker compose up --no-build --pull never
 ```
 
-No `docker compose build` or pip command is needed on FFW. All code, the launcher,
-profile and chosen home YAML are mounted read-only. Missing source paths fail instead
-of creating directories on the host. The root filesystem is read-only; temporary
-logs/caches use `/tmp`. The companion uses the existing local Zenoh router and has no
-serial devices, Docker socket, GPU, or privileged access. Default mode is preview.
-Stopping this Compose service affects only the companion, leaving existing ROBOTIS
-services running; physical stop limitations below still apply.
+Default is preview. Code/profile/home mounts and the root filesystem are read-only;
+there are no serial devices, GPU, Docker socket or privileged mounts. The existing local
+Zenoh router is reused. This container does not start ROBOTIS or homing.
 
-The local tests validate bundle portability, launch isolation and companion behavior.
-The installed ARM64 image has not been run with this companion on FFW yet; live runtime
-compatibility and controller/camera behavior remain commissioning work.
+The selected SNUPI file is `bg2_vr_startup_snupi.yaml`. Its head_joint1 target 0.78 exceeds
+the installed Rev4 upper limit 0.6951, so current validation rejects it. The YAML and
+limits remain unchanged. Resolve that mismatch before startup. The reference profile
+also remains unverified with execution disabled.
 
-`.env.example` lists the later deployment settings. Set FFW_INITIAL_POSITIONS to the
-same file selected by ROBOTIS init_position_file; changing that file requires no bridge
-code changes. The user selected `bg2_vr_startup_snupi.yaml`, and the template now points
-to it. Startup is pending review: its head_joint1 target 0.78 exceeds the actual installed
-model upper limit 0.6951. The companion rejects that configuration. No target/limit has
-been changed; resolve the mismatch before launching homing.
+## Restart, rollback and validation boundary
 
-## Current validation boundary
+Each new companion session requires fresh external homing; there is no homing between
+chunks. Explicit stop, a limit violation or external rehoming disarms the session.
+Restart the companion before fresh homing to resume. Restarting PRO 6000 alone does not
+restart this process. The gateway's explicit execute-mode shutdown sends a stop request.
 
-The supplied reference profile is not live verified and explicitly disables execution.
-Preview never creates hardware trajectory publishers. Execute additionally requires
-an explicitly enabled verified profile and all runtime readiness/ownership conditions.
-The 5090 network gateway and PRO 6000 SSH-tunneled HTTP RPC are implemented and tested
-locally. The earlier Unix-socket bridge is a legacy co-located draft; use the three-machine
-runbook. No transfer or live test is part of packaging this folder.
+To remove only this service, use `docker compose down --timeout 10` from its folder.
+That leaves existing ROBOTIS services and the reused image intact. It does not undo
+physical motion or stop separately managed robot bringup.
 
-All homing statuses must correspond to goals started after this companion begins; an
-old latched success cannot open readiness. External homing after capture invalidates
-this inference session and clears its old holds so it cannot preempt reinitialization.
-
-Feedback loss, clock jumps, controller health/ownership loss, or tracking divergence
-fault the session. A stop command is sent only with usable feedback and ownership.
-If those are unavailable, this code cannot guarantee an immediate physical stop; the
-last submitted finite trajectory may finish and the existing controller retains its
-last target. Keep the robot's independent stop/watchdog behavior available. This is
-not a collision/path planner or a replacement for the original EE10 controller's IK/CBF.
-Physical compatibility, acceleration behavior, live camera transforms, and sustained
-latency still need commissioning before execute mode.
+If feedback/ownership is unavailable, publishing a stop hold may be impossible; the last
+finite trajectory can finish and the controller can retain its final target. This is not
+torque disable or an independent emergency stop. Physical stop behavior, controller
+interpolation/tracking, calibration and ROS integration still require commissioning.

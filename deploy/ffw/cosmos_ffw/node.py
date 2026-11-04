@@ -6,12 +6,12 @@ import signal
 import time
 import uuid
 
-from .core import BridgeError, CONTROLLERS, GROUPS, JointFeedback, Startup, hold_messages, load_home_yaml, require, stamp_ns, validate_profile
+from .core import BridgeError, SafetyStop, CONTROLLERS, GROUPS, JointFeedback, Startup, hold_messages, load_home_yaml, require, stamp_ns, validate_profile
 from .chunks import ChunkExecutor
 from .ros_messages import joint_trajectory
 
 
-def make_node(profile, home, mode, velocity_scale):
+def make_node(profile, home, mode):
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy, ReliabilityPolicy
     from sensor_msgs.msg import JointState
@@ -26,7 +26,7 @@ def make_node(profile, home, mode, velocity_scale):
             require(self.get_parameter("use_sim_time").value is False, "Physical executor requires the robot clock, not simulated time")
             self.mode = mode
             self.startup = Startup(profile, home, self.now())
-            self.engine = ChunkExecutor(self.startup, velocity_scale=velocity_scale)
+            self.engine = ChunkExecutor(self.startup)
             self.feedback, self.command_publishers = None, {}
             self.controller_ok_at, self.pending_query = 0., None
             self.query_started = 0.
@@ -58,6 +58,8 @@ def make_node(profile, home, mode, velocity_scale):
                 require(self.feedback is None or frame.source_ns > self.feedback.source_ns, "Joint timestamps did not increase")
                 self.feedback = frame
                 self.startup.update(frame, self.now())
+                if self.mode == "execute":
+                    self.engine.monitor(frame, self.now())
             except (ValueError, KeyError) as error:
                 self.fault(str(error))
 
@@ -151,6 +153,9 @@ def make_node(profile, home, mode, velocity_scale):
                 self.engine.accept(data, self.feedback, self.now(), submit=self.send)
                 self.stop_sent = False
                 self.reason, self.last_rejection = "Chunk accepted", None
+            except SafetyStop as error:
+                self.last_rejection = str(error)
+                self.fault(str(error))
             except (ValueError, KeyError, TypeError) as error:
                 self.last_rejection = str(error)
             except Exception as error:
@@ -180,7 +185,7 @@ def make_node(profile, home, mode, velocity_scale):
                 # Missing feedback/ownership must not create invented stop positions.
                 pass
             self.startup.phase = "fault"
-            self.engine.valid_until_ns = 0
+            self.engine.execution_end_ns = 0
             self.get_logger().error(reason)
 
         def tick(self):
@@ -206,16 +211,15 @@ def make_node(profile, home, mode, velocity_scale):
                                 self.reason, can_tick = "Waiting for command endpoint discovery", False
                             else:
                                 self.guard()
-                                if not self.initial_hold_sent:
-                                    self.send(hold_messages(self.feedback, self.startup, self.now(), include_right=True))
-                                    self.initial_hold_sent = True
                     if can_tick:
-                        commands = self.engine.tick(self.feedback, self.now(), check_tracking=self.mode == "execute")
+                        commands = self.engine.tick(self.feedback, self.now(), submit=self.send, monitor=self.mode == "execute")
+                        self.initial_hold_sent = self.engine.ready_since_ns > 0
                         if commands is not None:
-                            self.send(commands)
-                            self.reason = "Chunk ended; holding and waiting for a fresh prediction"
+                            self.reason = "Holding the commanded position; ready for the next synchronous request"
             except (ValueError, KeyError) as error:
                 self.fault(str(error))
+            except Exception as error:
+                self.fault("Trajectory/hold publication failed: " + str(error))
             status = self.engine.status(self.now())
             status.update(mode=self.mode, physical_publishing=self.mode == "execute", command_messages=self.command_count,
                           reason=self.reason, last_rejection=self.last_rejection,
@@ -249,12 +253,10 @@ def main():
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--initial-positions", type=Path, required=True)
     parser.add_argument("--mode", choices=("preview", "execute"), default="preview")
-    parser.add_argument("--velocity-scale", type=float, default=.25)
     parser.add_argument("--check", action="store_true", help="Validate files only; do not import/init ROS or connect")
     args = parser.parse_args()
     profile = json.loads(args.profile.read_text())
     validate_profile(profile, live=args.mode == "execute", execute=args.mode == "execute")
-    require(0 < args.velocity_scale <= 1, "Invalid velocity scale")
     home = load_home_yaml(args.initial_positions, profile)
     if args.check:
         print(json.dumps({"valid": True, "mode": args.mode, "homing_groups": sorted(home), "robot_connection_opened": False}))
@@ -270,7 +272,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     try:
-        node = make_node(profile, home, args.mode, args.velocity_scale)
+        node = make_node(profile, home, args.mode)
         while not stopping and rclpy.ok():
             rclpy.spin_once(node, timeout_sec=.05)
     finally:

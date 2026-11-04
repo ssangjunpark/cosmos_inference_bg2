@@ -24,9 +24,9 @@ dot -Tpng -Gdpi=110 docs/diagrams/three_machine_pipeline.dot -o docs/diagrams/th
 ```mermaid
 flowchart LR
   F["FFW: cameras + joint feedback"] --> G["5090: align observations"]
-  G -->|"SSH tunnel: one asynchronous request"| P["PRO 6000: persistent Cosmos model"]
-  P -->|"16 × 8 absolute joint targets"| G
-  G -->|"one timestamped chunk"| C["FFW: companion validates + submits trajectory"]
+  G -->|"SSH tunnel: blocking request while FFW holds"| P["PRO 6000: persistent Cosmos model"]
+  P -->|"16 × 8 unchanged absolute targets"| G
+  G -->|"one timestamped chunk"| C["FFW: execute all 16, then hold final command"]
   C --> J["Existing ROBOTIS 100 Hz controllers"]
   J --> F
 ```
@@ -136,93 +136,45 @@ raw dimensions and timestamps; an operator still needs to compare orientation an
 field of view with the training preparation. Inspect requires no API password or model
 service and creates no policy publishers.
 
-## Chunk timing and holds
+## Synchronous execution and stops
 
-The policy returns 16 waypoints at 50 ms spacing: 0.8 seconds measured from the original
-FFW observation, including time spent in transmission and inference. PRO 6000 echoes
-that timestamp. The 5090 forwards the whole chunk once; FFW discards elapsed rows and
-submits future points to the existing JointTrajectoryController for interpolation.
-The 5090 never publishes physical joint commands.
+The agreed contract is **hold → fresh measured observation → inference → execute all 16
+points → hold the final command → request again**. See the
+[synchronous execution contract](synchronous_execution_20261104.md) for code, protocol,
+thresholds and restart behavior.
 
-One inference request is in flight. Before the active forecast expires, the gateway
-uses measured request latency plus 100 ms margin to request the newest observations.
-A new chunk replaces the remaining tail. Late responses, old session IDs, and fully
-expired chunks are rejected rather than retimed. If a chunk ends first, FFW holds the
-latest measured right pose while passive targets remain at the post-homing snapshot.
-A fresh valid chunk may resume a temporarily starved session.
+Every target is preserved, with 50 ms spacing from execution start. Inference time does
+not consume the execution horizon. The gateway waits for FFW's completed cycle and final
+hold before collecting the next joint/camera sample. Active chunks are never replaced.
 
-Rehoming invalidates the session and removes its old holds. Explicit stop or a fault
-closes the gate. Shutdown announces a new stopped epoch. A new companion session and
-new homing sequence are required to restart. Details and stop limitations are in the
-[FFW companion documentation](../deploy/ffw/README.md).
+Angular command/measured velocity above 2 rad/s or angular tracking error above 10 degrees
+faults the session and attempts a measured-position stop hold. No scaling, clipping or
+new linear elevator threshold is applied. A software hold cannot be guaranteed without
+usable feedback/controller ownership. Initial homing and 500 ms settling remain required
+for each companion session; there is no homing between chunks.
 
-## Local measurements and checks
+## Validation and deployment state
 
-RTX PRO 6000 GPU 5, step 20000, seed 0, four sampling steps, guidance 3, shift 5.
-Three warmup calls precede five HTTP recorded-input requests for each variant:
+90 local CPU tests run: 89 pass and the optional SDK test skips in the default host
+environment. They cover the synchronous lifecycle, unchanged target arrays, delayed
+inference, fresh post-hold inputs, limit-triggered terminal stops, TCP drop/refusal,
+HTTP timeout, homing, controller gates and standalone bundles. Physical actuation and
+network-failure stopping remain untested.
 
-| Variant | Loaded once (s) | Warm HTTP median (s) | Warm HTTP max (s) |
-| --- | ---: | ---: | ---: |
-| Edge | 18.09 | 0.231 | 0.293 |
-| Nano | 48.98 | 0.401 | 0.440 |
+Earlier warmed recorded-input HTTP timings were Edge 0.231 s median / 0.293 s maximum,
+Nano 0.401 / 0.440 s over five calls each. Those are historical local model timings,
+not synchronous full-cycle throughput or live robot benchmarks. Earlier reports describing
+skipped points or async trajectory acceptance do not validate this revised executor.
 
-Reports: `outputs/edge-network-replay/report.json` and
-`outputs/nano-network-replay/report.json`. Both return finite 16×8 absolute positions
-and preserve source timestamps. These are local HTTP timings, excluding real SSH/LAN,
-camera alignment and robot response; five requests establish a functional smoke test,
-not a sustained jitter/quality benchmark. With stationary feedback at the recorded pose
-and the worst measured request latency, the actual Edge reply passed the FFW bounds/velocity
-gate with nine future points remaining. Nano was rejected because its gripper prediction
-included -0.0081 rad, below the reference zero lower limit. This is model-output evidence,
-not a transport error; no clipping or gripper remapping is applied. See each replay folder
-for `ffw_validation.json`. Edge has more timing margin and is the initial
-runbook example. For serial requests, roughly two round-trip latencies plus margin must
-fit within 0.8 s to avoid holds; measured Nano is too close/slow for that guarantee.
+The installed 5090 copy predates this synchronous revision until explicitly updated;
+new local bundles do not update remote code/images. FFW has not received this companion.
+The initial observation-only commands remain valid and send no policy commands.
 
-CPU integration tests exercise raw synthetic cameras and measured joints through the
-actual HTTP service and gateway into the FFW chunk executor. Other cases cover stale
-inputs/status, timestamp skew, old epochs, starvation, duplicates, velocity/position
-limits, homing, holds, ownership loss, password-free localhost RPC, one model thread, and portable
-bundles. The unchanged SDK also passes actual local Zenoh pub/sub with bundled schemas, including
-inside the built Python-only gateway image with a read-only filesystem and network disabled;
-this is a loopback check, not validation against the robot's router.
+## Remaining commissioning inputs
 
-## Failure-case coverage
-
-87 CPU checks run: 86 pass; the optional SDK check skips in the host environment and
-passes separately in the isolated SDK environment. Local connection-failure tests use
-real loopback sockets and the HTTP client, with a fake model; they do not interrupt an
-actual SSH tunnel or connect to either remote machine. Log: `.runtime/logs/pipeline-failure-tests.log`.
-
-| Failure | Tested behavior | Test boundary |
-| --- | --- | --- |
-| Inference connection refused | No chunk forwarded; request state clears; a later fresh observation succeeds after backoff. | Actual local TCP refusal and HTTP recovery. |
-| TCP connection closes during a request | No chunk forwarded; no request remains stuck in flight. | Actual local socket shutdown. |
-| HTTP service accepts input but does not reply | Client times out; no chunk forwarded; request state clears. | Actual local HTTP endpoint with an intentionally withheld response. |
-| FFW status disappears or session changes during inference | Completed reply is discarded; stale/mismatched status cannot start new requests. | Simulated monotonic timestamps/session changes through gateway + actual HTTP service. |
-| No replacement chunk arrives | Current forecast expires; generate a measured right hold and preserve passive holds; fresh chunks may resume. | Robot-side executor with synthetic fresh feedback. |
-| Joint feedback or controller health is lost | Fault the session; do not invent a stop position or publish through failed controller gates. | ROS-node boundary mocked; physical stopping is unverified. |
-| Old, duplicate, malformed, out-of-bounds or overly fast predictions | Reject without replacing the last accepted trajectory. | CPU executor and protocol tests. |
-| Stale/misaligned observations, failed homing, competing publisher, clock jumps | Block readiness/requests or fault the session as appropriate. | Synthetic observations, clocks and ROS graph/service responses. |
-
-This is not exhaustive failure coverage. Still untested on the physical setup: SSH/LAN
-cable loss and reconnection, Zenoh router restart, process/container kills, machine power
-loss, real network congestion/jitter, and actual actuator response to holds/stops. If
-FFW feedback or command ownership is unavailable, a software hold cannot be guaranteed;
-the previous finite trajectory may finish and the existing controller may retain its
-last target. The robot's independent stop/watchdog must be checked during commissioning.
-
-## Information still needed for physical commissioning
-
-- Observed raw dimensions and the correct live-to-training rotation for each camera.
-  The reference configuration's rotation is evidence to compare, not a value to guess.
-- Actual selected home YAML, installed limits, position-controller claims, and exclusive
-  command ownership on FFW's installed 2.2.8 stack. No robot services were active during
-  the earlier read-only inspection. Do not use the alternate head target 0.78 until its
-  mismatch with the reference 0.6951 upper limit is resolved.
-- Sustained SSH/LAN jitter; the reverse SSH route now uses the known `3sp5090` alias.
-- Live preview acceptance followed by supervised initial motion, tracking, shutdown,
-  and starvation checks with the robot's independent stop available.
-
-No hardware values above have been filled in by assumption. The remaining work is
-commissioning the installed robot and verifying its observations and motion behavior.
+- Verify camera orientation and field of view against training, in addition to observed
+  raw dimensions (head 672×376, each wrist 424×240).
+- Resolve the unchanged SNUPI head target 0.78 versus installed upper limit 0.6951.
+- Verify actual controller claims, command ownership, calibration and supervised stopping.
+- Supply the actual instruction and verified deployment profile; execution remains disabled.
+- Update 5090 and FFW from matching synchronous bundles before preview or execution.

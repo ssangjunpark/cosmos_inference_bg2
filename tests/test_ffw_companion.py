@@ -11,8 +11,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from bg2_bridge.core import BridgeError, GROUPS, JointFeedback, Startup, all_names, load_home_yaml, validate_profile
-from bg2_bridge.chunks import ChunkExecutor, RequestPlanner, SCHEMA
+from bg2_bridge.core import BridgeError, GROUPS, JointFeedback, Startup, all_names, load_home_yaml, validate_profile, SafetyStop
+from bg2_bridge.chunks import ChunkExecutor, EXECUTION_CONTRACT, SCHEMA
 from package_ffw import build
 
 HOME = ROOT / "third_party/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/ffw_bg2_follower_initial_positions.yaml"
@@ -23,10 +23,10 @@ def profile():
     return json.loads((ROOT / "profiles/robotis_bg2_rev4.reference.json").read_text())
 
 
-def feedback(p, now, positions=None):
+def feedback(p, now, positions=None, velocities=None):
     names = all_names(p)
     positions = positions or {name: 0. for name in names}
-    return JointFeedback.from_arrays(names, [positions[n] for n in names], [0.] * len(names), now, now, p)
+    return JointFeedback.from_arrays(names, [positions[n] for n in names], [0.] * len(names) if velocities is None else [velocities.get(n, 0.) for n in names], now, now, p)
 
 
 def ready(p=None, custom=None):
@@ -47,12 +47,12 @@ def ready(p=None, custom=None):
     return startup, frame
 
 
-def chunk(startup, source, index=1, step=.001):
+def chunk(startup, source, index=1, step=.001, cycle=0):
     right = startup.profile["policy"]["joint_names"]
     rows = [[startup.hold[n] for n in right] for _ in range(16)]
     for i, row in enumerate(rows):
         row[0] += step * (i + 1)
-    return {"schema": SCHEMA, "epoch": startup.epoch, "request_id": f"{index:032x}",
+    return {"schema": SCHEMA, "execution_contract": EXECUTION_CONTRACT, "cycle": cycle, "epoch": startup.epoch, "request_id": f"{index:032x}",
             "source_time_ns": source, "joint_names": right, "units": ["rad"] * 8, "positions": rows}
 
 
@@ -121,171 +121,145 @@ class ChunkTests(unittest.TestCase):
         self.startup, self.frame = ready()
         self.engine = ChunkExecutor(self.startup)
         self.source = self.frame.source_ns
+        self.engine.tick(self.frame, self.source)
 
     def accept(self, data=None, now=None, submit=None):
-        now = now if now is not None else self.source + 20_000_000
-        return self.engine.accept(data or chunk(self.startup, self.source), feedback(self.startup.profile, now, self.frame.positions), now, submit=submit)
+        now = self.source + 20_000_000 if now is None else now
+        return self.engine.accept(data or chunk(self.startup, self.source),
+                                  feedback(self.startup.profile, now, self.frame.positions), now, submit=submit)
 
-    def test_full_chunk_preserves_original_due_times(self):
-        commands = self.accept()
-        msg = commands["arm_right"]["message"]
-        start = msg["header"]["stamp"]["sec"] * 10**9 + msg["header"]["stamp"]["nanosec"]
-        due = [start + p["time_from_start"]["sec"] * 10**9 + p["time_from_start"]["nanosec"] for p in msg["points"][1:]]
-        self.assertEqual(due[-1], self.source + 800_000_000)
-        self.assertTrue(all((v - self.source) % 50_000_000 == 0 for v in due))
-        self.assertTrue(all(v > self.source + 20_000_000 for v in due))
+    def test_all_16_targets_unchanged_and_timed_from_execution_even_after_slow_inference(self):
+        data = chunk(self.startup, self.source)
+        now = self.source + 2_000_000_000
+        msg = self.accept(data, now)["arm_right"]["message"]
+        self.assertEqual(len(msg["points"]), 16)
+        self.assertEqual([p["positions"] for p in msg["points"]], data["positions"])
+        offsets = [p["time_from_start"]["sec"] * 10**9 + p["time_from_start"]["nanosec"] for p in msg["points"]]
+        self.assertEqual(offsets, list(range(50_000_000, 800_000_001, 50_000_000)))
+        self.assertEqual(msg["header"]["stamp"]["sec"] * 10**9 + msg["header"]["stamp"]["nanosec"], now)
+        self.assertEqual(self.engine.execution_end_ns, now + 800_000_000)
 
-    def test_new_chunk_replaces_remaining_tail_without_a_fifo(self):
-        old = self.accept()
-        next_source = self.source + 100_000_000
-        data = chunk(self.startup, next_source, index=2)
-        self.accept(data, now=next_source + 20_000_000)
-        self.assertEqual(self.engine.last_request_id, data["request_id"])
-        self.assertIsNot(self.engine.last_commands, old)
-        self.assertEqual(self.engine.valid_until_ns, next_source + 800_000_000)
-
-    def test_partial_expiry_skips_elapsed_rows_without_retiming(self):
-        commands = self.accept(now=self.source + 600_000_000)
-        self.assertLess(len(commands["arm_right"]["message"]["points"]), 16)
-        self.assertEqual(self.engine.valid_until_ns, self.source + 800_000_000)
-
-    def test_expiry_holds_right_and_keeps_other_groups_at_captured_pose(self):
-        self.accept()
-        now = self.source + 800_000_000
-        positions = copy.deepcopy(self.frame.positions); positions["arm_r_joint1"] = .016
-        frame = feedback(self.startup.profile, now, positions)
-        result = self.engine.tick(frame, now)
-        self.assertEqual(self.startup.phase, "holding")
-        self.assertEqual(self.engine.valid_until_ns, 0)
-        self.assertEqual(result["arm_right"]["message"]["points"][0]["positions"][0], .016)
-        for group in self.startup.profile["hold_groups"]:
-            names = self.startup.profile["commands"][group]["joint_names"]
-            self.assertEqual(result[group]["message"]["points"][0]["positions"], [self.startup.hold[n] for n in names])
-        self.assertIsNone(self.engine.tick(frame, now + 1))
-
-    def test_right_hold_drift_after_expiry_is_detected(self):
-        self.accept()
-        now = self.source + 800_000_000
-        self.engine.tick(feedback(self.startup.profile, now), now)
-        pose = dict(self.frame.positions); pose['arm_r_joint1'] = .4
-        with self.assertRaisesRegex(BridgeError, "Right-arm hold"):
-            self.engine.tick(feedback(self.startup.profile, now + 50_000_000, pose), now + 50_000_000)
-
-    def test_fresh_chunk_can_resume_after_transient_starvation(self):
-        self.accept()
-        now = self.source + 800_000_000
-        self.engine.tick(feedback(self.startup.profile, now), now)
-        self.accept(chunk(self.startup, now, index=2), now=now)
-        self.assertEqual(self.startup.phase, "running")
-
-    def test_entirely_expired_chunk_is_rejected(self):
-        with self.assertRaisesRegex(BridgeError, "expired"):
-            self.accept(now=self.source + 800_000_000)
-        self.assertEqual(self.engine.last_source_ns, 0)
-
-    def test_bad_reply_leaves_previous_chunk_unchanged(self):
-        self.accept(); previous = self.engine.last_commands
-        bad = chunk(self.startup, self.source + 50_000_000, index=2)
-        bad["positions"][3][0] = float('nan')
-        with self.assertRaises(BridgeError): self.accept(bad)
+    def test_active_chunk_cannot_be_replaced(self):
+        previous = self.accept()
+        with self.assertRaisesRegex(BridgeError, "finish"):
+            self.accept(chunk(self.startup, self.source + 100_000_000, index=2), self.source + 120_000_000)
         self.assertIs(self.engine.last_commands, previous)
-        self.assertEqual(self.engine.last_source_ns, self.source)
+
+    def test_completion_holds_last_command_not_measured_pose_then_opens_next_cycle(self):
+        data=chunk(self.startup,self.source); self.accept(data)
+        end=self.engine.execution_end_ns
+        self.assertIsNone(self.engine.tick(feedback(self.startup.profile,end-1,self.frame.positions),end-1))
+        result=self.engine.tick(feedback(self.startup.profile,end,self.frame.positions),end)
+        self.assertEqual(self.startup.phase,'holding'); self.assertEqual(self.engine.cycle,1)
+        self.assertEqual(result['arm_right']['message']['points'][0]['positions'],data['positions'][-1])
+        self.assertNotEqual(result['arm_right']['message']['points'][0]['positions'][0],self.frame.positions['arm_r_joint1'])
+        for group in self.startup.profile['hold_groups']:
+            names=self.startup.profile['commands'][group]['joint_names']
+            self.assertEqual(result[group]['message']['points'][0]['positions'],[self.startup.hold[n] for n in names])
+        self.assertEqual(self.engine.last_completed_request_id,data['request_id'])
+        self.assertTrue(self.engine.status(end)['needs_chunk'])
+        self.assertIsNone(self.engine.tick(feedback(self.startup.profile,end+1,self.frame.positions),end+1))
+
+    def test_next_observation_must_follow_hold_and_match_cycle(self):
+        self.accept(); end=self.engine.execution_end_ns
+        self.engine.tick(feedback(self.startup.profile,end,self.frame.positions),end)
+        for source,cycle in [(end-1,1),(end,0)]:
+            with self.subTest(source=source,cycle=cycle),self.assertRaises(BridgeError):
+                self.accept(chunk(self.startup,source,index=2,cycle=cycle),end)
+        self.accept(chunk(self.startup,end,index=3,cycle=1),end)
+        self.assertEqual(self.startup.phase,'running')
+
+    def test_failed_hold_publication_does_not_announce_completion(self):
+        self.accept(); end=self.engine.execution_end_ns
+        def fail(_): raise RuntimeError('hold publish failed')
+        with self.assertRaises(RuntimeError):
+            self.engine.tick(feedback(self.startup.profile,end,self.frame.positions),end,submit=fail)
+        self.assertFalse(self.engine.status(end)['needs_chunk'])
+        self.assertEqual(self.engine.cycle,0)
+        self.assertIsNone(self.engine.last_completed_request_id)
+
+    def test_commanded_velocity_limit_is_absolute_2_radians_not_quarter_of_urdf(self):
+        for delta,allowed in [(.09,True),(.1,True),(.10001,False)]:
+            startup,frame=ready(); engine=ChunkExecutor(startup);engine.tick(frame,frame.source_ns)
+            data=chunk(startup,frame.source_ns)
+            for row in data['positions']: row[0]=frame.positions['arm_r_joint1']+delta
+            with self.subTest(delta=delta):
+                if allowed:
+                    commands=engine.accept(data,frame,frame.source_ns)
+                    self.assertEqual(commands['arm_right']['message']['points'][0]['positions'][0],delta)
+                else:
+                    with self.assertRaisesRegex(SafetyStop,'2 rad/s'):engine.accept(data,frame,frame.source_ns)
+
+    def test_first_segment_checks_held_command_as_well_as_measured_start(self):
+        pose=dict(self.frame.positions);pose['arm_r_joint1']=.15  # Still within the 10 degree tracking bound.
+        data=chunk(self.startup,self.source)
+        for row in data['positions']:row[0]=.15  # Zero distance from measurement but 3 rad/s from the commanded hold.
+        with self.assertRaisesRegex(SafetyStop,'preceding hold'):
+            self.engine.accept(data,feedback(self.startup.profile,self.source,pose),self.source)
+
+    def test_measured_velocity_limit_checks_both_signs_and_boundary(self):
+        for speed in [2.,-2.,2.001,-2.001]:
+            frame=feedback(self.startup.profile,self.source,self.frame.positions,{'arm_r_joint1':speed})
+            with self.subTest(speed=speed):
+                if abs(speed)<=2: self.engine.monitor(frame,self.source)
+                else:
+                    with self.assertRaisesRegex(SafetyStop,'2 rad/s'):self.engine.monitor(frame,self.source)
+
+    def test_angular_tracking_limit_is_ten_degrees_for_right_and_passive_joints(self):
+        for name in ['arm_r_joint1','arm_l_joint1','head_joint1']:
+            for degrees in [9.,10.,10.01]:
+                pose=dict(self.frame.positions);pose[name]+=math.radians(degrees)
+                frame=feedback(self.startup.profile,self.source,pose)
+                with self.subTest(name=name,degrees=degrees):
+                    if degrees<=10: self.engine.monitor(frame,self.source)
+                    else:
+                        with self.assertRaisesRegex(SafetyStop,'10 degrees'): self.engine.monitor(frame,self.source)
+
+    def test_tracking_follows_interpolated_target_not_future_final_target(self):
+        data=chunk(self.startup,self.source,step=.05)
+        self.accept(data,now=self.source)
+        now=self.source+75_000_000
+        pose=dict(self.frame.positions);pose['arm_r_joint1']=.075
+        self.engine.monitor(feedback(self.startup.profile,now,pose),now)
+        self.assertAlmostEqual(self.engine.expected_right(now)['arm_r_joint1'],.075)
+
+    def test_angle_limits_are_not_applied_to_prismatic_elevator(self):
+        pose=dict(self.frame.positions);pose['lift_joint']=-.3
+        self.engine.monitor(feedback(self.startup.profile,self.source,pose,{'lift_joint':3.}),self.source)
+
+    def test_nonfinite_and_out_of_bounds_predictions_are_safety_stops(self):
+        for value in [float('nan'),4.]:
+            data=chunk(self.startup,self.source);data['positions'][0][0]=value
+            with self.subTest(value=value),self.assertRaises(SafetyStop):self.accept(data)
 
     def test_publish_failure_does_not_commit_chunk(self):
-        def fail(_): raise RuntimeError("publish failed")
-        with self.assertRaises(RuntimeError): self.accept(submit=fail)
-        self.assertIsNone(self.engine.last_commands)
-        self.assertEqual(self.startup.phase, "ready")
+        def fail(_):raise RuntimeError('publish failed')
+        with self.assertRaises(RuntimeError):self.accept(submit=fail)
+        self.assertIsNone(self.engine.last_commands);self.assertEqual(self.startup.phase,'ready')
 
-    def test_duplicate_old_session_and_out_of_order_replies_are_rejected(self):
+    def test_old_protocol_session_duplicate_shape_units_and_future_time_are_rejected(self):
+        for updates in [{'execution_contract':'async'}, {'epoch':'old-session'}, {'cycle':9},
+                        {'positions':[[0.]*8]*15}, {'units':['degrees']*8},
+                        {'joint_names':list(reversed(self.startup.profile['policy']['joint_names']))},
+                        {'source_time_ns':self.source+100_000_000}]:
+            data={**chunk(self.startup,self.source),**updates}
+            with self.subTest(updates=updates),self.assertRaises(BridgeError):self.accept(data)
         self.accept()
-        with self.assertRaisesRegex(BridgeError, "Duplicate"): self.accept()
-        bad = chunk(self.startup, self.source + 50_000_000, index=2);bad["epoch"] = "old-session"
-        with self.assertRaisesRegex(BridgeError, "session"):self.accept(bad)
-        bad = chunk(self.startup, self.source - 1, index=3)
-        with self.assertRaisesRegex(BridgeError, "out-of-order"):self.accept(bad)
+        with self.assertRaisesRegex(BridgeError,'Duplicate'):self.accept()
 
-    def test_wrong_order_units_shape_and_future_stamp_are_rejected(self):
-        for key, value in [("joint_names", list(reversed(self.startup.profile["policy"]["joint_names"]))),
-                           ("units", ["degrees"] * 8), ("positions", [[0.] * 8] * 15),
-                           ("source_time_ns", self.source + 100_000_000)]:
-            bad = chunk(self.startup, self.source);bad[key] = value
-            with self.subTest(key=key), self.assertRaises(BridgeError):self.accept(bad)
+    def test_stop_is_terminal_and_holds_all_fresh_measured_positions(self):
+        self.accept();now=self.source+100_000_000
+        pose=dict(self.frame.positions);pose['arm_r_joint1']=.003;pose['arm_l_joint1']=.04
+        commands=self.engine.stop(feedback(self.startup.profile,now,pose),now,fault=True)
+        self.assertEqual(self.startup.phase,'fault');self.assertFalse(self.engine.status(now)['needs_chunk'])
+        for group,spec in self.startup.profile['commands'].items():
+            self.assertEqual(commands[group]['message']['points'][0]['positions'],[pose[n] for n in spec['joint_names']])
+        with self.assertRaises(BridgeError):self.accept(chunk(self.startup,now,index=2),now)
 
-    def test_position_and_velocity_limits_are_enforced(self):
-        for value in [4., .8]:
-            bad = chunk(self.startup, self.source)
-            for row in bad["positions"]:row[0] = value
-            with self.subTest(value=value), self.assertRaises(BridgeError):self.accept(bad)
-
-    def test_stale_feedback_and_hold_drift_are_rejected(self):
-        self.accept()
-        with self.assertRaisesRegex(BridgeError, "Stale"):
-            self.engine.tick(self.frame, self.source + 200_000_000)
-        pose = dict(self.frame.positions);pose["arm_l_joint2"] = .3
-        with self.assertRaisesRegex(BridgeError, "Held group"):
-            self.engine.tick(feedback(self.startup.profile, self.source, pose), self.source)
-
-    def test_right_tracking_failure_is_detected(self):
-        self.accept()
-        pose = dict(self.frame.positions);pose["arm_r_joint1"] = .5
-        now = self.source + 100_000_000
-        with self.assertRaisesRegex(BridgeError, "tracking"):
-            self.engine.tick(feedback(self.startup.profile, now, pose), now)
-
-    def test_clock_jump_is_rejected(self):
-        self.engine.clock(self.source, 1_000_000)
-        with self.assertRaisesRegex(BridgeError, "clock jumped"):
-            self.engine.clock(self.source + 1_000_000_000, 51_000_000)
-
-
-class PrefetchTests(unittest.TestCase):
-    def test_requests_start_before_chunk_ends_and_only_one_is_in_flight(self):
-        planner = RequestPlanner(150_000_000, margin_ns=50_000_000)
-        status = {"phase": "running", "remaining_ns": 200_000_000}
-        self.assertTrue(planner.should_request(status, 100, 100, 123))
-        planner.started(123)
-        self.assertFalse(planner.should_request(status, 100, 100, 124))
-        planner.finished(160_000_000)
-        self.assertTrue(planner.should_request(status, 100, 100, 124))
-        self.assertFalse(planner.should_request(status, 100, 100, 123))
-
-    def test_ready_holding_and_stale_status(self):
-        planner = RequestPlanner(100_000_000)
-        for phase in ['ready','holding']:
-            self.assertTrue(planner.should_request({'phase':phase,'remaining_ns':0}, 100, 100, 123))
-        self.assertFalse(planner.should_request({'phase':'running','remaining_ns':0},100,200_000_101,123))
-        self.assertFalse(planner.should_request({'phase':'fault','remaining_ns':0},100,100,123))
-
-    def test_repeated_fast_requests_overlap_chunks_without_starvation(self):
-        startup, frame = ready()
-        engine = ChunkExecutor(startup)
-        planner = RequestPlanner(150_000_000, margin_ns=50_000_000)
-        pending = None
-        accepted, held = 0, 0
-        source = frame.source_ns
-        for step in range(100):
-            now = source + step * 50_000_000
-            current = feedback(startup.profile, now)
-            result = engine.tick(current, now)
-            held += int(result is not None)
-            if pending is not None and now >= pending[0]:
-                _, observed, identifier = pending
-                engine.accept(chunk(startup, observed, index=identifier), current, now)
-                planner.finished(100_000_000)
-                pending = None
-                accepted += 1
-            status = engine.status(now)
-            if planner.should_request(status, step * 50_000_000, step * 50_000_000, now):
-                planner.started(now)
-                pending = (now + 100_000_000, now, accepted + 1)
-        self.assertGreater(accepted, 5)
-        self.assertEqual(held, 0)
-        self.assertEqual(startup.phase, 'running')
-
-    def test_prefetch_uses_local_elapsed_time_without_server_wall_clock(self):
-        planner = RequestPlanner(100_000_000, margin_ns=20_000_000)
-        self.assertTrue(planner.should_request({'phase':'running','remaining_ns':200_000_000},100,100_000_100,123))
+    def test_stale_feedback_and_clock_jump_are_rejected(self):
+        with self.assertRaisesRegex(BridgeError,'Stale'):self.engine.tick(self.frame,self.source+200_000_000)
+        self.engine.clock(self.source,1_000_000)
+        with self.assertRaisesRegex(BridgeError,'clock jumped'):self.engine.clock(self.source+1_000_000_000,51_000_000)
 
 
 class BundleTests(unittest.TestCase):
@@ -392,7 +366,7 @@ class NodeWiringTests(unittest.TestCase):
         modules['controller_manager_msgs.srv'].ListControllers=NS(Request=Message)
         p=profile();home=load_home_yaml(HOME,p)
         with mock.patch.dict(sys.modules,modules):
-            node=self.module.make_node(p,home,mode,.25)
+            node=self.module.make_node(p,home,mode)
         patcher=mock.patch.object(self.module,'joint_trajectory',lambda data:NS(data=data));patcher.start();self.addCleanup(patcher.stop)
         node.trajectory_class=Trajectory
         return node
@@ -468,12 +442,47 @@ class NodeWiringTests(unittest.TestCase):
         before=len(node.status_pub.sent);node.shutdown_hold()
         self.assertEqual(len(node.status_pub.sent),before)
 
+    def test_unsafe_chunk_faults_session_and_sends_stop_instead_of_only_rejecting(self):
+        import time
+        from types import SimpleNamespace as NS
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        before=node.command_count
+        data=chunk(node.startup,node.feedback.source_ns)
+        data['positions'][0][0]=.11
+        node.chunk(NS(data=json.dumps(data)))
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('2 rad/s',node.reason)
+        self.assertEqual(node.command_count,before+4)
+        self.assertFalse(node.engine.status(node.robot_ns)['needs_chunk'])
+        before=node.command_count
+        node.chunk(NS(data=json.dumps(chunk(node.startup,node.feedback.source_ns,index=2))))
+        self.assertEqual(node.command_count,before)
+
+    def test_measured_velocity_violation_in_joint_callback_faults_and_stops(self):
+        import time
+        from types import SimpleNamespace as NS
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        names=all_names(profile()); velocities=[0.]*len(names);velocities[names.index('arm_r_joint1')]=2.01
+        stamp=NS(sec=node.robot_ns//10**9,nanosec=node.robot_ns%10**9+1)
+        before=node.command_count
+        node.joints(NS(name=names,position=[node.feedback.positions[n] for n in names],velocity=velocities,header=NS(stamp=stamp)))
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('2 rad/s',node.reason)
+        self.assertEqual(node.command_count,before+4)
+
+    def test_runtime_tracking_violation_faults_and_stops(self):
+        import time
+        node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
+        pose=dict(node.feedback.positions);pose['arm_r_joint1']=math.radians(11)
+        node.feedback=feedback(profile(),node.robot_ns,pose)
+        before=node.command_count;node.tick()
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('10 degrees',node.reason)
+        self.assertEqual(node.command_count,before+4)
+
     def test_feedback_loss_faults_without_inventing_a_stop_position(self):
         import time
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
         before=node.command_count;node.feedback=None;node.tick()
         self.assertEqual(node.startup.phase,'fault')
-        self.assertEqual(node.engine.valid_until_ns,0)
+        self.assertEqual(node.engine.execution_end_ns,0)
         self.assertEqual(node.command_count,before)
 
     def test_controller_health_loss_faults_and_cannot_publish_a_hold(self):
@@ -481,7 +490,7 @@ class NodeWiringTests(unittest.TestCase):
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
         before=node.command_count;node.controller_ok_at=0;node.tick()
         self.assertEqual(node.startup.phase,'fault')
-        self.assertEqual(node.engine.valid_until_ns,0)
+        self.assertEqual(node.engine.execution_end_ns,0)
         self.assertEqual(node.command_count,before)
 
     def test_stale_lease_and_stale_feedback_cannot_submit_a_chunk(self):

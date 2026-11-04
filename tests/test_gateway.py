@@ -18,7 +18,7 @@ sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'tests')]
 from bg2_bridge.core import GROUPS,JointFeedback,Startup,all_names,load_home_yaml,BridgeError
 from bg2_bridge.observations import Observations,decode_view
 from bg2_bridge.gateway import Gateway,GatewayTransport,StatusCache
-from bg2_bridge.chunks import ChunkExecutor
+from bg2_bridge.chunks import ChunkExecutor, EXECUTION_CONTRACT, STATUS_SCHEMA
 from bg2_bridge.rpc import InferenceClient
 from inference_server import PolicyService,make_server
 from test_network_inference import FakePolicy,observation
@@ -58,8 +58,8 @@ def ready(p):
     return value
 
 
-def status(epoch,robot_now=ROBOT,mode='preview',phase='ready',remaining=0):
-    return {'schema':'cosmos_bg2_status_v1','epoch':epoch,'robot_now_ns':robot_now,'mode':mode,'phase':phase,'remaining_ns':remaining}
+def status(epoch,robot_now=ROBOT,mode='preview',phase='ready',remaining=0,cycle=0,ready_since=ROBOT,completed=None):
+    return {'schema':STATUS_SCHEMA,'execution_contract':EXECUTION_CONTRACT,'epoch':epoch,'robot_now_ns':robot_now,'mode':mode,'phase':phase,'remaining_ns':remaining,'cycle':cycle,'ready_since_ns':ready_since,'needs_chunk':phase in {'ready','holding'},'last_completed_request_id':completed}
 
 
 class ObservationTests(unittest.TestCase):
@@ -82,6 +82,15 @@ class ObservationTests(unittest.TestCase):
             with self.subTest(camera_stamp=camera_stamp),self.assertRaises(BridgeError):
                 obs.snapshot('instruction',ROBOT,receipt_now_ns=now)
 
+    def test_sync_snapshot_requires_all_camera_and_joint_stamps_after_hold(self):
+        p=profile();obs=Observations(p);obs.add_joints(sample(p,ROBOT+10_000_000,MONO+10_000_000))
+        for key in p['cameras']:obs.add_camera(key,ROBOT,MONO,image(key))
+        with self.assertRaises(BridgeError):
+            obs.snapshot('instruction',ROBOT+10_000_000,receipt_now_ns=MONO+10_000_000,not_before_ns=ROBOT+1)
+        for key in p['cameras']:obs.add_camera(key,ROBOT+10_000_000,MONO+10_000_000,image(key))
+        result=obs.snapshot('instruction',ROBOT+10_000_000,receipt_now_ns=MONO+10_000_000,not_before_ns=ROBOT+1)
+        self.assertEqual(int(result['source_time_ns']),ROBOT+10_000_000)
+
     def test_unknown_rotation_dimensions_or_wrong_crop_do_not_get_guessed(self):
         p=profile()
         for updates in [{'live_to_training_rotation_deg':None},{'raw_wh':[640,480]},{'crop_xyxy':[0,0,10,10]}]:
@@ -98,126 +107,143 @@ class ObservationTests(unittest.TestCase):
 class GatewayTests(unittest.TestCase):
     def setUp(self):
         self.p=profile();self.startup=ready(self.p);self.robot=ChunkExecutor(self.startup)
-        self.observations=Observations(self.p);self.observations.add_joints(sample(self.p))
-        for key in self.p['cameras']:self.observations.add_camera(key,ROBOT,MONO,image(key))
+        self.robot.tick(sample(self.p,ROBOT,ROBOT),ROBOT)
+        self.observations=Observations(self.p);self.add_observation(ROBOT,MONO)
         self.cache=StatusCache();self.cache.update(status(self.startup.epoch),MONO)
         self.service=PolicyService(FakePolicy,{},observation(),1)
         self.server=make_server(('127.0.0.1',0),self.service)
         self.thread=threading.Thread(target=self.server.serve_forever,kwargs={'poll_interval':.01},daemon=True);self.thread.start()
         self.client=InferenceClient(f'http://127.0.0.1:{self.server.server_address[1]}')
-        self.sent=[]
+        self.sent=[];self.robot_now=ROBOT+20_000_000
         def forward(result):
             self.sent.append(result)
-            self.robot.accept(result,sample(self.p,ROBOT+20_000_000,ROBOT+20_000_000),ROBOT+20_000_000)
-        self.gateway=Gateway(self.observations,self.cache,self.client,forward,'Pick up the garbage truck.',latency_budget_ns=100_000_000)
+            self.robot.accept(result,sample(self.p,self.robot_now,self.robot_now),self.robot_now)
+        self.gateway=Gateway(self.observations,self.cache,self.client,forward,'Pick up the garbage truck.')
     def tearDown(self):
         if self.service.policy.block is not None:self.service.policy.block.set()
         self.gateway.close();self.server.shutdown();self.server.server_close();self.thread.join(2);self.service.close()
-    def finish(self,now=MONO+20_000_000):
-        deadline=time.monotonic()+3
-        event=None
-        while self.gateway.future is not None and time.monotonic()<deadline:
-            event=self.gateway.step(now);time.sleep(.005)
-        self.assertIsNone(self.gateway.future)
-        return event
+    def add_observation(self,source,received):
+        self.observations.add_joints(sample(self.p,source,received))
+        for key in self.p['cameras']:self.observations.add_camera(key,source,received,image(key))
 
-    def test_raw_observation_to_http_to_ffw_executor_runs_without_robot_connection(self):
-        self.gateway.step(MONO);self.finish()
-        self.assertEqual(len(self.sent),1)
+    def test_raw_observation_to_http_to_full_ffw_chunk(self):
+        event=self.gateway.step(MONO)
+        self.assertEqual(event['event'],'forwarded');self.assertEqual(len(self.sent),1)
+        self.assertEqual(self.robot.execution_end_ns,self.robot_now+800_000_000)
         self.assertEqual(self.sent[0]['source_time_ns'],ROBOT)
-        self.assertEqual(self.sent[0]['epoch'],self.startup.epoch)
-        self.assertEqual(self.robot.valid_until_ns,ROBOT+800_000_000)
-        self.assertEqual(self.startup.phase,'running')
-        self.assertEqual(len(self.robot.last_commands),4)
-        self.assertEqual(self.service.calls,1)
+        self.assertEqual(self.startup.phase,'running');self.assertEqual(self.service.calls,1)
+        self.assertEqual(len(self.robot.last_commands['arm_right']['message']['points']),16)
 
-    def test_stale_status_and_preview_execute_mismatch_do_not_start_requests(self):
+    def test_no_requests_during_execution_or_before_completion_acknowledgement(self):
+        self.gateway.step(MONO)
+        self.add_observation(ROBOT+30_000_000,MONO+30_000_000)
+        # Even an old ready status must not cause a second request after forwarding.
+        self.gateway.step(MONO+30_000_000);self.assertEqual(self.gateway.requests,1)
+        self.cache.update(status(self.startup.epoch,ROBOT+40_000_000,phase='running'),MONO+40_000_000)
+        self.gateway.step(MONO+40_000_000);self.assertEqual(self.gateway.requests,1)
+
+    def test_next_request_only_after_final_hold_with_a_new_observation(self):
+        self.gateway.step(MONO)
+        end=self.robot.execution_end_ns
+        self.robot.tick(sample(self.p,end,end),end)
+        state=self.robot.status(end);state['mode']='preview'
+        elapsed=end-ROBOT
+        self.cache.update(state,MONO+elapsed)
+        self.gateway.step(MONO+elapsed)  # No post-hold cameras/joints yet.
+        self.assertEqual(self.gateway.requests,1)
+        self.add_observation(end,MONO+elapsed);self.robot_now=end+20_000_000
+        event=self.gateway.step(MONO+elapsed)
+        self.assertEqual(event['event'],'forwarded');self.assertEqual(self.gateway.requests,2)
+        self.assertEqual(self.sent[-1]['cycle'],1);self.assertEqual(self.sent[-1]['source_time_ns'],end)
+
+    def test_slow_inference_keeps_all_points_instead_of_expiring_them(self):
+        # Keep the FFW hold heartbeat fresh throughout a >0.8-second model request.
+        block=threading.Event();self.service.policy.block=block
+        result=[];start=time.monotonic_ns()
+        self.observations=Observations(self.p);self.gateway.observations=self.observations
+        self.add_observation(ROBOT,start);self.cache.update(status(self.startup.epoch),start)
+        t=threading.Thread(target=lambda:result.append(self.gateway.step()));t.start()
+        while time.monotonic_ns()-start<850_000_000:
+            elapsed=time.monotonic_ns()-start
+            self.cache.update(status(self.startup.epoch,ROBOT+elapsed),start+elapsed)
+            time.sleep(.01)
+        elapsed=time.monotonic_ns()-start;self.robot_now=ROBOT+elapsed
+        block.set();t.join(3)
+        self.assertFalse(t.is_alive());self.assertEqual(result[0]['event'],'forwarded',result)
+        self.assertEqual(len(self.robot.last_commands['arm_right']['message']['points']),16)
+        self.assertEqual(self.robot.execution_end_ns,self.robot_now+800_000_000)
+
+    def test_stale_status_mode_mismatch_and_running_never_start_requests(self):
         self.gateway.step(MONO+151_000_000)
-        self.assertEqual(self.gateway.requests,0)
-        self.cache.update(status(self.startup.epoch,mode='execute'),MONO+200_000_000)
-        self.gateway.step(MONO+200_000_000)
+        for updates in [{'mode':'execute'},{'phase':'running'},{'phase':'fault'}]:
+            self.cache.update(status(self.startup.epoch,**updates),MONO)
+            self.gateway.step(MONO)
         self.assertEqual(self.gateway.requests,0)
 
-    def test_epoch_change_discards_inflight_result(self):
-        self.service.policy.block=threading.Event();self.gateway.step(MONO)
-        self.cache.update(status(uuid.uuid4().hex,ROBOT+10_000_000),MONO+10_000_000)
-        self.service.policy.block.set();self.finish()
+    def test_old_async_status_is_rejected(self):
+        old=status(self.startup.epoch);old['schema']='cosmos_bg2_status_v1'
+        with self.assertRaises(BridgeError):self.cache.update(old,MONO)
+
+    def test_session_change_or_user_stop_during_inference_never_forwards(self):
+        original=self.gateway.client
+        class Changed:
+            def predict(inner,obs,epoch,ident):
+                result=original.predict(obs,epoch,ident)
+                self.cache.update(status(uuid.uuid4().hex),MONO)
+                return result
+        self.gateway.client=Changed();event=self.gateway.step(MONO)
+        self.assertEqual(event['event'],'discarded');self.assertEqual(self.sent,[])
+
+    def test_explicit_close_during_inference_never_forwards(self):
+        original=self.gateway.client
+        class Closed:
+            def predict(inner,obs,epoch,ident):
+                result=original.predict(obs,epoch,ident);self.gateway.close();return result
+        self.gateway.client=Closed();self.gateway.step(MONO)
         self.assertEqual(self.sent,[])
-        self.assertEqual(self.gateway.failed,1)
 
-    def test_status_disappearing_discards_result(self):
-        self.gateway.step(MONO);self.finish(MONO+200_000_000)
-        self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
-
-    def test_prediction_that_arrives_near_expiry_is_not_forwarded(self):
-        self.service.policy.block=threading.Event();self.gateway.step(MONO)
-        self.cache.update(status(self.startup.epoch,ROBOT+750_000_000),MONO+10_000_000)
-        self.service.policy.block.set();self.finish()
-        self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
-
-    def test_connection_refused_forwards_nothing_and_recovers_with_a_new_observation(self):
+    def test_connection_refusal_recovers_with_a_new_held_observation(self):
         import socket
         original=self.gateway.client
         with socket.socket() as unavailable:
-            unavailable.bind(('127.0.0.1',0))  # Reserve a local port without a listening service.
+            unavailable.bind(('127.0.0.1',0))
             self.gateway.client=InferenceClient(f'http://127.0.0.1:{unavailable.getsockname()[1]}',timeout=.1)
-            self.gateway.step(MONO);self.finish()
+            self.gateway.step(MONO)
         self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
-        self.assertFalse(self.gateway.planner.in_flight)
-        self.gateway.client=original
-        self.gateway.send_chunk=self.sent.append
-        later=130_000_000
-        self.observations.add_joints(sample(self.p,ROBOT+later,MONO+later))
-        for key in self.p['cameras']:self.observations.add_camera(key,ROBOT+later,MONO+later,image(key))
+        self.assertFalse(self.gateway.in_flight)
+        self.gateway.client=original;self.gateway.send_chunk=self.sent.append
+        later=130_000_000;self.add_observation(ROBOT+later,MONO+later)
         self.cache.update(status(self.startup.epoch,ROBOT+later),MONO+later)
-        self.gateway.step(MONO+later);self.finish(MONO+later+10_000_000)
-        self.assertEqual(self.gateway.forwarded,1)
-        self.assertEqual(self.sent[0]['source_time_ns'],ROBOT+later)
-        self.assertEqual(self.gateway.requests,2)
+        self.gateway.step(MONO+later)
+        self.assertEqual(self.gateway.forwarded,1);self.assertEqual(self.gateway.requests,2)
 
-    def test_dropped_tcp_connection_does_not_forward_or_leave_request_inflight(self):
-        import socket
-        import socketserver
+    def test_dropped_tcp_connection_and_timeout_forward_nothing(self):
+        import socket,socketserver
         class Drop(socketserver.BaseRequestHandler):
             def handle(self):
-                self.request.recv(4096)
-                self.request.shutdown(socket.SHUT_RDWR)
+                self.request.recv(4096);self.request.shutdown(socket.SHUT_RDWR)
         server=socketserver.TCPServer(('127.0.0.1',0),Drop)
         thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
         try:
-            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',timeout=.2)
-            self.gateway.step(MONO);self.finish()
-            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
-            self.assertFalse(self.gateway.planner.in_flight)
-        finally:
-            server.shutdown();server.server_close();thread.join(2)
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',timeout=.1)
+            self.gateway.step(MONO)
+            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1);self.assertFalse(self.gateway.in_flight)
+        finally:server.shutdown();server.server_close();thread.join(2)
 
-    def test_unresponsive_http_service_times_out_without_forwarding(self):
+    def test_http_timeout_does_not_forward_or_leave_request_running(self):
         from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-        release=threading.Event();entered=threading.Event()
+        release=threading.Event()
         class Hang(BaseHTTPRequestHandler):
             def do_POST(self):
-                self.rfile.read(int(self.headers['Content-Length']))
-                entered.set();release.wait(2)
+                self.rfile.read(int(self.headers['Content-Length']));release.wait(2)
             def log_message(self,*_):pass
         server=ThreadingHTTPServer(('127.0.0.1',0),Hang)
         thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
         try:
             self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',timeout=.1)
-            self.gateway.step(MONO);self.finish()
-            self.assertTrue(entered.is_set())
-            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
-            self.assertFalse(self.gateway.planner.in_flight)
-        finally:
-            release.set();server.shutdown();server.server_close();thread.join(2)
-
-    def test_no_request_queue_or_repeated_observation(self):
-        self.service.policy.block=threading.Event();self.gateway.step(MONO)
-        for _ in range(10):self.gateway.step(MONO+1)
-        self.assertEqual(self.gateway.requests,1)
-        self.service.policy.block.set();self.finish()
-        for _ in range(10):self.gateway.step(MONO+21_000_000)
-        self.assertEqual(self.gateway.requests,1)
+            self.gateway.step(MONO)
+            self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1);self.assertFalse(self.gateway.in_flight)
+        finally:release.set();server.shutdown();server.server_close();thread.join(2)
 
 
 class GatewayTransportTests(unittest.TestCase):

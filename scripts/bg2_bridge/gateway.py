@@ -1,5 +1,4 @@
-"""5090 gateway: observations and asynchronous RPC only; no joint command publishers."""
-from concurrent.futures import ThreadPoolExecutor
+"""5090 synchronous observation → inference → full-chunk gateway."""
 from io import BytesIO
 from pathlib import Path
 import json
@@ -10,9 +9,8 @@ import time
 import uuid
 
 from PIL import Image
-
-from .core import BridgeError, JointFeedback, require, stamp_ns
-from .chunks import RequestPlanner
+from .core import JointFeedback, require, stamp_ns
+from .chunks import EXECUTION_CONTRACT, STATUS_SCHEMA
 from .observations import Observations
 from .rpc import identifier
 
@@ -23,15 +21,20 @@ class StatusCache:
         self.value, self.received_ns = None, 0
 
     def update(self, value, received_ns):
-        require(isinstance(value, dict) and value.get('schema') == 'cosmos_bg2_status_v1', 'Unknown FFW status')
+        require(isinstance(value, dict) and value.get('schema') == STATUS_SCHEMA and
+                value.get('execution_contract') == EXECUTION_CONTRACT, 'Synchronous FFW status required')
         identifier(value.get('epoch'))
         require(value.get('phase') in {'initializing','settling','ready','running','holding','fault','stopped'}, 'Invalid FFW phase')
         require(value.get('mode') in {'preview','execute'}, 'Invalid FFW mode')
         require(type(value.get('robot_now_ns')) is int and value['robot_now_ns'] > 0, 'Invalid robot status clock')
-        require(type(value.get('remaining_ns')) is int and 0 <= value['remaining_ns'] <= 800_000_000, 'Invalid remaining horizon')
+        require(type(value.get('cycle')) is int and value['cycle'] >= 0, 'Invalid execution cycle')
+        require(type(value.get('ready_since_ns')) is int and value['ready_since_ns'] >= 0, 'Invalid hold timestamp')
+        require(type(value.get('needs_chunk')) is bool, 'Invalid request readiness')
+        if value['needs_chunk']:
+            require(value['phase'] in {'ready','holding'} and 0 < value['ready_since_ns'] <= value['robot_now_ns'], 'Invalid hold readiness')
         with self.lock:
             if self.value and value['epoch'] == self.value['epoch']:
-                require(value['robot_now_ns'] >= self.value['robot_now_ns'], 'Out-of-order FFW status')
+                require(value['robot_now_ns'] >= self.value['robot_now_ns'] and value['cycle'] >= self.value['cycle'], 'Out-of-order FFW status')
             self.value, self.received_ns = dict(value), received_ns
 
     def get(self, now_ns):
@@ -42,66 +45,72 @@ class StatusCache:
 
 
 class Gateway:
-    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', latency_budget_ns=200_000_000):
+    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview'):
         self.observations, self.status, self.client = observations, status, client
         self.send_chunk, self.instruction, self.mode = send_chunk, instruction, mode
-        self.planner = RequestPlanner(latency_budget_ns)
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='cosmos-request')
-        self.future, self.context, self.epoch = None, None, None
+        self.epoch, self.awaiting, self.last_source_ns = None, None, 0
         self.forwarded, self.requests, self.failed, self.next_retry_ns = 0, 0, 0, 0
+        self.closed, self.in_flight = False, False
+
+    def eligible(self, cached):
+        return cached is not None and cached[0]['mode'] == self.mode and cached[0]['needs_chunk'] and cached[0]['phase'] in {'ready','holding'}
 
     def step(self, now_ns=None):
-        now_ns = time.monotonic_ns() if now_ns is None else now_ns
+        entered_ns = time.monotonic_ns()
+        now_ns = entered_ns if now_ns is None else now_ns
         cached = self.status.get(now_ns)
-        eligible = cached is not None and cached[0]['mode'] == self.mode and cached[0]['phase'] in {'ready','running','holding'}
-        event = None
-        if eligible:
-            current, received = cached
-            if current['epoch'] != self.epoch:
-                self.epoch = current['epoch']
-                self.planner = RequestPlanner(self.planner.latency_budget_ns, in_flight=self.future is not None)
-        if self.future is not None and self.future.done():
-            context, future = self.context, self.future
-            self.future, self.context = None, None
-            elapsed = max(1, now_ns - context['started_ns'])
-            self.planner.finished(elapsed)
-            try:
-                result = future.result()
-                require(eligible and current['epoch'] == context['epoch'], 'Discarded result from an old/unavailable FFW session')
-                robot_now = current['robot_now_ns'] + (now_ns - received)
-                require(result['source_time_ns'] + 800_000_000 - robot_now >= 100_000_000, 'Discarded late prediction')
-                self.send_chunk(result)
-                self.forwarded += 1
-                event = {'event':'forwarded','request_id':result['request_id'],'epoch':result['epoch'],
-                         'source_time_ns':result['source_time_ns'],'roundtrip_seconds':elapsed/1e9,'timings':result.get('timings',{})}
-            except Exception as error:
-                self.failed += 1
-                self.next_retry_ns = now_ns + 100_000_000
-                event = {'event':'discarded','reason':str(error),'roundtrip_seconds':elapsed/1e9}
-        if self.future is None and eligible and now_ns >= self.next_retry_ns:
-            try:
-                source_hint = self.observations.latest_source_ns()
-                if not self.planner.should_request(current, received, now_ns, source_hint):
-                    return event
-                robot_now = current['robot_now_ns'] + (now_ns - received)
-                observation = self.observations.snapshot(self.instruction, robot_now, receipt_now_ns=now_ns)
-                source = int(observation['source_time_ns'])
-                if source - self.planner.last_source_ns >= 50_000_000 and self.planner.should_request(current,received,now_ns,source):
-                    request_id = uuid.uuid4().hex
-                    self.planner.started(source)
-                    self.context = {'epoch':current['epoch'],'started_ns':now_ns,'request_id':request_id}
-                    self.future = self.pool.submit(self.client.predict,observation,current['epoch'],request_id)
-                    self.requests += 1
-                    event = event or {'event':'requested','request_id':request_id,'epoch':current['epoch'],'source_time_ns':source}
-            except (ValueError, OSError) as error:
-                event = event or {'event':'waiting','reason':str(error)}
-        if not eligible:
-            event = event or {'event':'waiting','reason':'Waiting for fresh FFW status in the matching preview/execute mode'}
-        return event
+        if self.closed or self.in_flight or not self.eligible(cached):
+            return {'event':'waiting','reason':'Waiting for FFW to finish all points and hold'}
+        current, received = cached
+        if current['epoch'] != self.epoch:
+            self.epoch, self.awaiting, self.last_source_ns = current['epoch'], None, 0
+        if self.awaiting is not None:
+            cycle, request_id = self.awaiting
+            if current['cycle'] <= cycle:
+                return {'event':'waiting','reason':'Waiting for FFW chunk completion acknowledgement'}
+            if current.get('last_completed_request_id') != request_id:
+                return {'event':'waiting','reason':'FFW completion does not match the submitted chunk'}
+            self.awaiting = None
+        if now_ns < self.next_retry_ns:
+            return None
+        try:
+            if self.observations.latest_source_ns() <= self.last_source_ns:
+                return None
+            robot_now = current['robot_now_ns'] + (now_ns - received)
+            observation = self.observations.snapshot(self.instruction, robot_now, receipt_now_ns=now_ns,
+                                                     not_before_ns=current['ready_since_ns'])
+            source = int(observation['source_time_ns'])
+            if source <= self.last_source_ns:
+                return None
+        except (ValueError, OSError) as error:
+            return {'event':'waiting','reason':str(error)}
+        self.last_source_ns = source
+        request_id, epoch, cycle = uuid.uuid4().hex, current['epoch'], current['cycle']
+        self.requests += 1
+        self.in_flight = True
+        started = time.monotonic_ns()
+        try:
+            # Blocking inference: FFW is holding, and no next request is prefetched.
+            result = self.client.predict(observation, epoch, request_id)
+            elapsed = max(1, time.monotonic_ns() - started)
+            latest = self.status.get(now_ns + time.monotonic_ns() - entered_ns)
+            require(not self.closed and self.eligible(latest) and latest[0]['epoch'] == epoch and
+                    latest[0]['cycle'] == cycle, 'FFW session/readiness changed while inference was running')
+            result = {**result, 'execution_contract':EXECUTION_CONTRACT, 'cycle':cycle}
+            self.send_chunk(result)
+            self.awaiting = cycle, request_id
+            self.forwarded += 1
+            return {'event':'forwarded','request_id':request_id,'epoch':epoch,'cycle':cycle,
+                    'source_time_ns':source,'roundtrip_seconds':elapsed/1e9,'timings':result.get('timings',{})}
+        except Exception as error:
+            self.failed += 1
+            self.next_retry_ns = now_ns + max(1, time.monotonic_ns() - entered_ns) + 100_000_000
+            return {'event':'discarded','reason':str(error)}
+        finally:
+            self.in_flight = False
 
     def close(self):
-        if self.future is not None:self.future.cancel()
-        self.pool.shutdown(wait=True,cancel_futures=True)
+        self.closed = True
 
 
 class GatewayTransport:

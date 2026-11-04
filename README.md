@@ -4,6 +4,9 @@ RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model servi
 5090 observation gateway, and a companion for the existing FFW-BG2 controllers. All code is
 prepared here first. The gateway is now installed on 3sp5090; FFW remains unchanged.
 
+The current control contract is **hold → fresh observation → infer → execute all 16 points
+→ hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).
+
 Start with the [three-machine runbook](docs/three_machine_pipeline.md). It covers the three
 processes, SSH tunnel, preview, chunk timing, measured latency, and remaining hardware checks.
 
@@ -202,8 +205,9 @@ existing ROBOTIS bringup/driver containers stay unchanged.
 
 Read [FFW bundle documentation](deploy/ffw/README.md) for the chunk wire protocol and
 request/execution lifecycle. The 5090 forwards complete timestamped chunks; FFW validates
-and submits the remaining points to its existing trajectory controllers. New requests
-overlap execution; starvation produces a local hold. The persistent server and asynchronous 5090 transport are implemented and tested locally.
+and submits all 16 points to its existing trajectory controllers. A new request starts
+only after full execution and the final-command hold. The synchronous gateway and
+companion are implemented and tested locally.
 The matching gateway folder is prepared with:
 
 ```bash
@@ -212,7 +216,7 @@ python3 scripts/package_gateway.py --output transfer/5090
 
 Warm local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano
 0.401 s median / 0.440 s max over five requests each. Edge recorded output also passed
-the FFW trajectory gate with measured latency. Nano produced a small negative gripper
+the earlier async trajectory gate; that is not validation of this revised executor. Nano produced a small negative gripper
 target and was correctly rejected against reference limits; outputs are never silently
 clipped. Live camera transforms, installed hardware compatibility, and sustained network/robot
-behavior remain unverified. The 5090 gateway is installed and checked; FFW deployment remains pending.
+behavior remain unverified. The installed 5090 copy predates this synchronous revision until updated. FFW deployment remains pending.

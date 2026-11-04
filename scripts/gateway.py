@@ -63,10 +63,10 @@ def main():
     def stop(*_):
         nonlocal stopped
         stopped=True
+        if engine is not None: engine.close()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     if client is not None:
-        engine=Gateway(observations,status,client,transport.send_chunk,args.instruction,args.mode,
-                       latency_budget_ns=health['latency_budget_ns'])
+        engine=Gateway(observations,status,client,transport.send_chunk,args.instruction,args.mode)
     start=time.monotonic();last_report=0.;last_event=None
     try:
         with (args.output/'events.jsonl').open('x') as journal:
@@ -82,7 +82,7 @@ def main():
                     print(json.dumps(summary),flush=True);last_report=time.monotonic()
                 time.sleep(.01)
     finally:
-        # A requested stop is best effort; the FFW's independent expiry hold remains
+        # A requested stop is best effort; the FFW's independent final-command hold remains
         # responsible for network-loss behavior. No joint command is sent here.
         current=status.get(time.monotonic_ns())
         if engine is not None and args.mode=='execute' and engine.forwarded and current and current[0]['mode']=='execute':
