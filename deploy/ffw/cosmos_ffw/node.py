@@ -273,7 +273,7 @@ def main():
     args = parser.parse_args()
     profile = json.loads(args.profile.read_text())
     validate_profile(profile, live=args.mode == "execute", execute=args.mode == "execute")
-    home = load_home_yaml(args.initial_positions, profile, validate_targets=args.initialization == "homing")
+    home = load_home_yaml(args.initial_positions, profile)
     if args.check:
         print(json.dumps({"valid": True, "mode": args.mode, "homing_groups": sorted(home), "initialization": args.initialization, "robot_connection_opened": False}))
         return

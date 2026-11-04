@@ -22,7 +22,7 @@ follower or a competing VR/teleoperation publisher. The companion defaults to
 `COSMOS_INITIALIZATION=current`: it checks fresh, settled feedback for 500 ms and
 captures the measured pose. It does not require another home move, including after
 a companion restart. The existing YAML position/velocity tolerances are reused for
-settling; current-position bounds, controller health and ownership checks remain.
+settling; finite feedback, controller health and ownership checks remain.
 If you want a specific initial pose, put the robot there using ROBOTIS first.
 `COSMOS_INITIALIZATION=homing` restores the optional fresh-homing requirement.
 
@@ -163,8 +163,12 @@ docker compose down --timeout 3
 The separately managed ROBOTIS follower stays running. Software hold is not torque
 disable or an independent emergency stop; use the robot's stop for urgent stopping.
 
-The existing 2 rad/s, 10-degree tracking, position, freshness and controller/ownership
-checks remain. The head override changes only the companion's accepted head range.
+The operator removed bridge position-range rejection for all joints after measured
+head feedback reached 0.780796 rad around the 0.78-radian SNUPI target. Measured holds,
+startup feedback and finite predicted targets are no longer rejected against reference
+position bounds. Values are not clipped to those bounds. Finite/shape, 2 rad/s,
+10-degree tracking, freshness and controller/ownership checks remain. ROBOTIS model
+and controller configuration are unchanged; profile ranges remain reference metadata.
 
 ## Recreate the execution profile later
 

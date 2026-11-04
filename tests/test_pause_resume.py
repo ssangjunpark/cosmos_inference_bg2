@@ -44,9 +44,18 @@ class CurrentPoseTests(unittest.TestCase):
         self.assertIsNone(start.hold)
         now=BASE+950_000_000;start.update(feedback(p,now),now);self.assertEqual(start.phase,'ready')
 
-    def test_current_pose_still_checks_limits(self):
-        p,start=self.startup();pose=dict(feedback(p,BASE).positions);pose['gripper_r_joint1']=-.01
-        with self.assertRaises(BridgeError):start.update(feedback(p,BASE,pose),BASE)
+    def test_range_overshoot_for_every_joint_is_preserved_without_clipping(self):
+        for boundary,offset in [('upper',.001),('lower',-.001)]:
+            p,start=self.startup()
+            pose={name:p['reference_limits'][name][boundary]+offset for name in feedback(p,BASE).positions}
+            for i in range(11):
+                now=BASE+i*50_000_000;frame=feedback(p,now,pose);start.update(frame,now)
+            self.assertEqual(start.phase,'ready');self.assertEqual(start.hold,pose)
+            engine=ChunkExecutor(start);commands=engine.tick(frame,now)
+            for group,spec in p['commands'].items():
+                self.assertEqual(commands[group]['message']['points'][0]['positions'],[pose[n] for n in spec['joint_names']])
+            data=chunk(start,now,cycle=engine.cycle)
+            self.assertEqual(engine.accept(data,frame,now)['arm_right']['message']['points'][0]['positions'],data['positions'][0])
 
     def test_in_progress_homing_blocks_capture_even_if_goal_predates_startup(self):
         p,start=self.startup();start.homing_status('arm_right',2,BASE-1)

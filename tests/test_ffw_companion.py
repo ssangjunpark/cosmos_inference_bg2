@@ -126,11 +126,11 @@ class HomingTests(unittest.TestCase):
         for name, limit in p['reference_limits'].items():
             if name != 'head_joint1':self.assertEqual(overridden['reference_limits'][name],limit)
         check_positions(['head_joint1'], [.78], overridden)
-        with self.assertRaises(BridgeError):check_positions(['head_joint1'], [.7801], overridden)
-        startup, frame = ready(p=overridden, custom={'head_joint1': .78})
+        check_positions(['head_joint1'], [.7807962210335844], overridden)
+        startup, frame = ready(p=overridden, custom={'head_joint1': .7807962210335844})
         engine = ChunkExecutor(startup)
         commands = engine.tick(frame, frame.source_ns)
-        self.assertEqual(commands['head']['message']['points'][0]['positions'][0], .78)
+        self.assertEqual(commands['head']['message']['points'][0]['positions'][0], .7807962210335844)
 
     def test_execution_profile_still_requires_verified_cameras_and_explicit_enable(self):
         from prepare_execution_profile import prepare
@@ -254,7 +254,7 @@ class ChunkTests(unittest.TestCase):
         pose=dict(self.frame.positions);pose['lift_joint']=-.3
         self.engine.monitor(feedback(self.startup.profile,self.source,pose,{'lift_joint':3.}),self.source)
 
-    def test_nonfinite_and_out_of_bounds_predictions_are_safety_stops(self):
+    def test_nonfinite_and_excessive_velocity_predictions_are_safety_stops(self):
         for value in [float('nan'),4.]:
             data=chunk(self.startup,self.source);data['positions'][0][0]=value
             with self.subTest(value=value),self.assertRaises(SafetyStop):self.accept(data)

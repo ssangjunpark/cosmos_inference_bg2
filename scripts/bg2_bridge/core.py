@@ -111,7 +111,7 @@ class JointFeedback:
         require(-25_000_000 <= now_ns - self.source_ns <= max_age_ns, "Stale feedback or unsynchronized robot clock")
 
 
-def load_home_yaml(path: Path, profile, *, validate_targets=True):
+def load_home_yaml(path: Path, profile):
     """ROBOTIS files repeat the /** root. Preserve every executor instead of dropping earlier ones."""
     import yaml
 
@@ -145,8 +145,7 @@ def load_home_yaml(path: Path, profile, *, validate_targets=True):
         require(data["action_topic"] == f"/{controller}/follow_joint_trajectory", "Invalid homing action")
         pose = dict(zip(names, map(float, positions)))
         for name, value in pose.items():
-            limit = profile["reference_limits"][name]
-            require(math.isfinite(value) and (not validate_targets or limit["lower"] <= value <= limit["upper"]), f"Homing pose outside limits: {name}")
+            require(math.isfinite(value), f"Nonfinite homing position: {name}")
         targets[group] = {"positions": pose, "position_tolerance": float(data["position_tolerance"]),
                           "velocity_tolerance": float(data["velocity_tolerance"]),
                           "status_topic": data["action_topic"] + "/_action/status"}
@@ -246,9 +245,10 @@ class Startup:
 
 def check_positions(names, values, profile):
     require(len(names) == len(values), "Position vector shape mismatch")
+    # Operator removed bridge position-range rejection for every joint.
+    # Retain finite values; velocity/tracking checks are applied separately.
     for name, value in zip(names, values):
-        limit = profile["reference_limits"][name]
-        require(math.isfinite(float(value)) and limit["lower"] <= value <= limit["upper"], f"Target outside limits: {name}")
+        require(math.isfinite(float(value)), f"Nonfinite joint position: {name}")
 
 
 def message(names, rows, offsets, start_ns):

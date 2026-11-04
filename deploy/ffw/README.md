@@ -33,7 +33,8 @@ matches training. Full details are in `docs/synchronous_execution_20261104.md` i
 Angular planned/measured velocity above **2 rad/s** or tracking error above **10 degrees**
 causes a terminal session fault and a best-effort fresh measured-position stop hold.
 The angle limits apply to angular joints, including the grippers and head, not the linear
-elevator. Position bounds and freshness/controller checks remain. Targets are never scaled,
+elevator. Finite-value and freshness/controller checks remain. Bridge position-range rejection
+was removed for all joints at the operator's request. Targets are never scaled,
 clipped or silently altered. The former quarter-speed rejection threshold is removed.
 
 The controller-manager loop is configured for 100 Hz; the companion timer is 20 Hz and
@@ -80,12 +81,11 @@ Default is preview with current-pose initialization. Code/profile/home mounts an
 there are no serial devices, GPU, Docker socket or privileged mounts. The existing local
 Zenoh router is reused. This container does not start ROBOTIS or homing.
 
-The selected SNUPI file is `bg2_vr_startup_snupi.yaml`. Its head_joint1 target 0.78 exceeds
-the installed Rev4 upper limit 0.6951, so current validation rejects it. The YAML and
-limits remain unchanged. The operator-approved separate execution profile permits head_joint1 up to 0.78;
-the ROBOTIS model and reference limits are not edited. See `docs/policy_execution.md`
-in the main repository. Without that override, resolve the mismatch before startup. The reference profile
-also remains unverified with execution disabled.
+The selected SNUPI file is `bg2_vr_startup_snupi.yaml`. Reference position ranges
+remain metadata; the bridge no longer rejects measured holds or predicted targets
+against them. The operator requested this after slight head feedback variation around
+the SNUPI target. Finite values, 2 rad/s and 10-degree stops, freshness, ownership and
+controller health remain enforced. The ROBOTIS model/YAML were not edited.
 
 ## Restart, rollback and validation boundary
 
