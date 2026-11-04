@@ -230,6 +230,20 @@ class ObservationTests(unittest.TestCase):
         np.testing.assert_array_equal(decoded, physical[1:])
         self.assertGreater(float(decoded.max()), 2.)
 
+    def test_decoder_floors_only_negative_future_right_gripper(self):
+        import numpy as np
+        from bg2_inference import decode_actions
+        observation = self.load(self.observation())
+        contract = {"normalization": {"joint_position": {"q01": [-1.] * 8, "q99": [1.] * 8}}}
+        normalized = np.tile(observation["joint_position"], (17, 1))
+        normalized[1:, 0] = -.3
+        normalized[1:, 7] = np.asarray([-.00101, 0., .012, 1.2] + [.5] * 12)
+        original = normalized.copy()
+        decoded = decode_actions(normalized, observation, contract)
+        np.testing.assert_array_equal(decoded[:, :7], original[1:, :7])
+        np.testing.assert_array_equal(decoded[:, 7], [0., *original[2:, 7]])
+        np.testing.assert_array_equal(normalized, original)
+
     def test_decoder_rejects_wrong_shape_and_changed_conditioning(self):
         import numpy as np
         from bg2_inference import decode_actions

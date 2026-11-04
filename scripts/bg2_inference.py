@@ -128,4 +128,7 @@ def decode_actions(normalized: np.ndarray, observation: dict, contract: dict) ->
     targets = absolute[1:].astype(np.float32)
     if not np.isfinite(targets).all():
         raise ValueError("Nonfinite decoded joint positions")
+    # Operator-requested output floor; training normalization stays unchanged.
+    gripper = JOINT_NAMES.index("gripper_r_joint1")
+    targets[:, gripper] = np.maximum(targets[:, gripper], 0.)
     return targets

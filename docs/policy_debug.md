@@ -4,6 +4,8 @@ The BG2 request uses `mode="policy"`, matching the supplied training loader and
 both Edge/Nano checkpoints. It predicts 16 absolute right-arm/gripper targets at
 50 ms intervals. No imagined future video or extra VAE decoding is requested.
 The DROID WAM example is not used for BG2 inference.
+Negative predicted right-gripper targets are floored to zero after decoding, as
+requested by the operator. Other targets and training normalization are unchanged.
 
 The operator first brings up the robot, puts it in the intended initial pose, and
 checks all three cameras and measured joints. Then start debug manually. Debug does
