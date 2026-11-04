@@ -9,10 +9,11 @@ predicts only right arm/gripper; the companion still publishes measured startup
 holds for the left arm/gripper, head and elevator. Keep the independent robot stop
 available for this first moving run; physical tracking and stopping remain untested.
 
-The gateway on 5090 is updated without starting it. A small FFW bundle is staged on
-5090 at `~/cosmos_ffw_companion.tar.gz`. FFW itself has not been modified by our tools.
-The operator performs the copy/start commands below. No Docker build or download is
-needed on FFW; it reuses the installed `robotis/ai-worker:2.2.8` image.
+Both 5090 and FFW are installed at source revision `940d5ee`, without starting the
+gateway or companion. The one-time FFW copy was completed at the user's request on
+2026-11-05 KST; see [the installation record](ffw_setup_20261105.md). Skip copying files
+for ordinary inference runs. FFW reuses its installed `robotis/ai-worker:2.2.8` image;
+no Docker build or download is needed.
 
 ## 1. Keep the robot stack running
 
@@ -54,16 +55,12 @@ ssh -N -T -o ExitOnForwardFailure=yes \
 Keep it open. If a working tunnel already occupies 18008, reuse it instead of starting
 another. Verify on 5090 with `curl --fail http://127.0.0.1:18008/health`.
 
-## 4. 5090: copy/update FFW once per software change
+## 4. FFW: installation complete; check and start
+
+The copy is already complete. From a terminal on 5090:
 
 ```bash
-scp ~/cosmos_ffw_companion.tar.gz ffw:~/
 ssh ffw
-if [ -f "$HOME/cosmos_ffw_companion/compose.yaml" ]; then
-  docker compose -f "$HOME/cosmos_ffw_companion/compose.yaml" down --timeout 3
-fi
-mkdir -p ~/cosmos_ffw_companion
-tar -xzf ~/cosmos_ffw_companion.tar.gz -C ~/cosmos_ffw_companion
 cd ~/cosmos_ffw_companion
 python3 verify_bundle.py
 ```
