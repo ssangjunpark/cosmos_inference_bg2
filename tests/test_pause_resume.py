@@ -37,12 +37,21 @@ class CurrentPoseTests(unittest.TestCase):
 
     def test_motion_and_feedback_gaps_reset_settling(self):
         p,start=self.startup();start.update(feedback(p,BASE),BASE)
-        start.update(feedback(p,BASE+400_000_000,velocities={'arm_r_joint1':.02}),BASE+400_000_000)
+        start.update(feedback(p,BASE+400_000_000,velocities={'arm_r_joint1':2.01}),BASE+400_000_000)
         self.assertIsNone(start.hold)
         for i in range(10):
             now=BASE+450_000_000+i*50_000_000;start.update(feedback(p,now),now)
         self.assertIsNone(start.hold)
         now=BASE+950_000_000;start.update(feedback(p,now),now);self.assertEqual(start.phase,'ready')
+
+    def test_measured_gripper_jitter_does_not_block_current_pose_startup(self):
+        p,start=self.startup()
+        for i in range(11):
+            now=BASE+i*50_000_000;pose=dict(feedback(p,now).positions)
+            pose['gripper_l_joint1']=.0015339807878858025*(i%2)
+            frame=feedback(p,now,pose,{'gripper_l_joint1':.0716283126,'gripper_r_joint1':.0955044168})
+            start.update(frame,now)
+        self.assertEqual(start.phase,'ready');self.assertEqual(start.hold,pose)
 
     def test_range_overshoot_for_every_joint_is_preserved_without_clipping(self):
         for boundary,offset in [('upper',.001),('lower',-.001)]:
@@ -156,6 +165,13 @@ class GatewayResumeTests(unittest.TestCase):
             self.assertEqual(len(sent[0]['positions']),16)
             self.assertEqual(observed_prompts,['New task instruction'])
         finally:service.close()
+
+    def test_waiting_reports_actual_ffw_initialization_phase(self):
+        cache=StatusCache();value=status(uuid.uuid4().hex,mode='execute',phase='settling',ready_since=0)
+        value['reason']='Waiting for settled current joint feedback';cache.update(value,MONO)
+        engine=Gateway(mock.Mock(),cache,mock.Mock(),mock.Mock(),'task','execute')
+        event=engine.step(MONO)
+        self.assertEqual(event['ffw_phase'],'settling');self.assertEqual(event['reason'],value['reason'])
 
     def test_existing_gateway_cannot_undo_a_pause_or_resume_a_fault(self):
         cache=StatusCache();epoch=uuid.uuid4().hex

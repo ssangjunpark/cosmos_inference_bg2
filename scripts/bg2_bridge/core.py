@@ -225,9 +225,20 @@ class Startup:
                 check_positions(names, [feedback.positions[n] for n in names], self.profile)
             if self.current_anchor is None:
                 self.current_anchor = dict(feedback.positions)
-        settled = all(abs(feedback.positions[n] - (target if self.require_homing else self.current_anchor[n])) <= data["position_tolerance"] and
-                      abs(feedback.velocities[n]) <= data["velocity_tolerance"]
-                      for data in self.home.values() for n, target in data["positions"].items())
+        settled = True
+        for data in self.home.values():
+            for name, target in data["positions"].items():
+                anchor = target if self.require_homing else self.current_anchor[name]
+                # Current-pose startup uses the operator's existing angular limit,
+                # not the much tighter homing velocity tolerance on noisy grippers.
+                angular = self.profile["reference_limits"][name]["type"] in ("revolute", "continuous")
+                velocity_limit = MAX_ANGULAR_VELOCITY if not self.require_homing and angular else data["velocity_tolerance"]
+                if (abs(feedback.positions[name] - anchor) > data["position_tolerance"] or
+                        abs(feedback.velocities[name]) > velocity_limit):
+                    settled = False
+                    break
+            if not settled:
+                break
         if not settled:
             self.stable_since = None
             if not self.require_homing:

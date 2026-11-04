@@ -72,7 +72,10 @@ class Gateway:
                 self.next_resume_retry_ns = now_ns + 100_000_000
                 return {'event':'resume_requested','epoch':cached[0]['epoch']}
         if self.closed or self.in_flight or not self.eligible(cached):
-            return {'event':'waiting','reason':'Waiting for FFW to finish all points and hold'}
+            if cached is not None:
+                return {'event':'waiting','ffw_phase':cached[0]['phase'],
+                        'reason':cached[0].get('reason') or 'FFW phase: '+cached[0]['phase']}
+            return {'event':'waiting','reason':'Waiting for fresh compatible FFW status'}
         current, received = cached
         if current['epoch'] != self.epoch:
             self.epoch, self.awaiting, self.last_source_ns = current['epoch'], None, 0
