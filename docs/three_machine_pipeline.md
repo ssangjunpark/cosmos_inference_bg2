@@ -1,9 +1,10 @@
 # Three-machine Cosmos inference pipeline
 
 Updated 2026-11-04. All software below is implemented and tested locally on PRO 6000.
-Gateway software is being installed on 3sp5090 at the user's request. FFW remains
+Gateway software is installed and tested on 3sp5090 at the user's request. FFW remains
 unchanged; no robot services or motion commands have been started by this setup.
 The reference hardware profile deliberately remains non-executable.
+See the [5090 setup record](5090_setup_20261104.md) for the installed location and checks.
 
 Rendered diagram: [PNG](diagrams/three_machine_pipeline.png),
 [SVG for zooming/printing](diagrams/three_machine_pipeline.svg),

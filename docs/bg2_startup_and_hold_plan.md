@@ -4,11 +4,11 @@ Agreed on 2026-11-04 for `cosmos_inference_bg2`, to be cloned onto the inference
 that communicates with the physical ROBOTIS FFW-BG2.
 
 Recorded-observation inference has passed for both Edge and Nano. Hardware integration
-is now being prepared locally. The `3sp5090` inference PC is restricted to read-only
-inspection: no file edits, installs, container restarts, homing, or controller changes there.
+is implemented locally. The user authorized gateway installation on `3sp5090`; FFW
+remains read-only and physical execution has not been commissioned.
 A local FFW companion now implements homing/hold coordination and chunk submission
-for later deployment. It has been checked offline; live commissioning and the 5090 ↔ PRO
-6000 network gateway remain pending. See [FFW bundle](../deploy/ffw/README.md).
+for later deployment. It has been checked offline; live commissioning remains pending.
+The 5090 gateway is installed and synthetic RPC over SSH passed. See [FFW bundle](../deploy/ffw/README.md).
 
 ## Agreed behavior
 
@@ -177,12 +177,12 @@ and head letterboxing after establishing the source orientation.
 ## Next implementation work
 
 Use the verified output decoder from the [inference pipeline implementation plan](inference_pipeline_plan.md).
-Continue local implementation while keeping `3sp5090` read-only.
+The 5090 software is installed; keep FFW unchanged until deployment is authorized.
 
 1. Local FFW startup/hold coordination and offline/mock tests are implemented; commission
    them against the installed controllers only after deployment is authorized.
-2. Add the live observation adapter after verifying camera orientation, and add a persistent
-   inference interface using the already integrated training adapter.
+2. Verify live camera orientation/dimensions before using the installed observation adapter.
+   The persistent inference interface is implemented.
 3. The tested chunk builder validates names, shape, units, timestamps, finite positions,
    reference limits, tracking, and velocity. Confirm real hardware limits/profile before use.
 4. Benchmark warmed repeated inference and choose timestamp handling and execution cadence.

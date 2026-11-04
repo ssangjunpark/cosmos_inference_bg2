@@ -67,7 +67,8 @@ The user requested minimal changes and reuse of existing software. The FFW launc
 now uses the installed image directly instead of building a derived image. The 39
 affected FFW tests pass and Docker Compose configuration validation passes locally.
 The refreshed generated `transfer/ffw/` folder contains the code and Compose file for later copy;
-no remote machine was contacted or modified. The 5090 setup is now authorized and underway.
+that FFW-only preparation made no remote changes. The 5090 gateway is now installed;
+see [5090 setup record](5090_setup_20261104.md) for verified checks and pending configuration.
 
 ## Transfer-folder layout
 

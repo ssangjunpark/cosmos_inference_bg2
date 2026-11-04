@@ -2,7 +2,7 @@
 
 RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model service, a thin
 5090 observation gateway, and a companion for the existing FFW-BG2 controllers. All code is
-prepared here first; neither remote machine has been modified or deployed to.
+prepared here first. The gateway is now installed on 3sp5090; FFW remains unchanged.
 
 Start with the [three-machine runbook](docs/three_machine_pipeline.md). It covers the three
 processes, SSH tunnel, preview, chunk timing, measured latency, and remaining hardware checks.
@@ -22,7 +22,7 @@ ROBOTIS integration source is pinned in `third_party/ai_worker` and
 `third_party/zenoh_ros2_sdk`. The SDK revision matches the inspected inference-PC checkout.
 The [BG2 reference profile](profiles/robotis_bg2_rev4.reference.json) records discovered
 interfaces with execution disabled; live hardware compatibility is still unverified.
-The remote inference PC `3sp5090` is restricted to read-only inspection.
+The user authorized gateway setup on `3sp5090`. See the [5090 setup record](docs/5090_setup_20261104.md). FFW remains read-only.
 
 
 ## Clone
@@ -215,4 +215,4 @@ Warm local HTTP requests measured Edge 0.231 s median / 0.293 s max and Nano
 the FFW trajectory gate with measured latency. Nano produced a small negative gripper
 target and was correctly rejected against reference limits; outputs are never silently
 clipped. Live camera transforms, installed hardware compatibility, and sustained network/robot
-behavior remain unverified. Neither bundle has been transferred or deployed.
+behavior remain unverified. The 5090 gateway is installed and checked; FFW deployment remains pending.
