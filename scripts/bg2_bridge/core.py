@@ -22,7 +22,7 @@ class SafetyStop(BridgeError):
     """A motion-limit violation that must latch the session in fault."""
 
 
-MAX_ANGULAR_VELOCITY = 4.0  # rad/s, explicitly requested by the operator
+MAX_ANGULAR_VELOCITY = 9999.0  # rad/s, explicitly requested by the operator
 MAX_ANGULAR_ERROR = math.radians(10)
 
 

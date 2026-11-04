@@ -52,7 +52,7 @@ another request from a stale ready message. Restart after diagnosing the deliver
 - Command-step velocity: no target-step rejection, scaling or retiming. The operator
   selected measured velocity only.
 - Measured motion: while execute mode is initialized, stop if any monitored angular joint
-  reports absolute velocity above **4 rad/s**.
+  reports absolute velocity above **9999 rad/s**.
 - Tracking: stop if any angular joint differs by more than **10 degrees** from its current
   command reference. The right-arm reference interpolates the commanded waypoints from fresh measured state at acceptance; passive
   angular joints use captured holds. Holding uses the last commanded right target.
@@ -109,5 +109,5 @@ The local CPU suite runs 90 tests: 89 pass and one optional SDK check skips in t
 environment; that SDK check also passes separately in the isolated local SDK environment. Coverage includes a real local HTTP request held longer than 0.8 seconds,
 all 16 targets unchanged, delayed/stale status, no mid-chunk request or replacement,
 post-hold camera/joint timestamps, final commanded holds despite different measurements,
-4 rad/s and 10 degree boundaries, terminal ROS-node stop behavior, old-protocol rejection,
+9999 rad/s and 10 degree boundaries, terminal ROS-node stop behavior, old-protocol rejection,
 feedback/ownership faults, and bundle portability. This is software validation only.

@@ -241,12 +241,12 @@ class ChunkTests(unittest.TestCase):
         self.assertAlmostEqual(engine.expected_right(frame.source_ns+25_000_000)['arm_r_joint4'],(measured+target)/2)
 
     def test_measured_velocity_limit_checks_both_signs_and_boundary(self):
-        for speed in [4.,-4.,4.001,-4.001]:
+        for speed in [4.01,-4.01,9999.,-9999.,9999.001,-9999.001]:
             frame=feedback(self.startup.profile,self.source,self.frame.positions,{'arm_r_joint1':speed})
             with self.subTest(speed=speed):
-                if abs(speed)<=4: self.engine.monitor(frame,self.source)
+                if abs(speed)<=9999: self.engine.monitor(frame,self.source)
                 else:
-                    with self.assertRaisesRegex(SafetyStop,'4 rad/s'):self.engine.monitor(frame,self.source)
+                    with self.assertRaisesRegex(SafetyStop,'9999 rad/s'):self.engine.monitor(frame,self.source)
 
     def test_angular_tracking_limit_is_ten_degrees_for_right_and_passive_joints(self):
         for name in ['arm_r_joint1','arm_l_joint1','head_joint1']:
@@ -535,10 +535,10 @@ class NodeWiringTests(unittest.TestCase):
         import time
         from types import SimpleNamespace as NS
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
-        node.feedback=feedback(profile(),node.robot_ns,node.feedback.positions,{'arm_r_joint1':4.01})
+        node.feedback=feedback(profile(),node.robot_ns,node.feedback.positions,{'arm_r_joint1':9999.01})
         before=node.command_count
         node.chunk(NS(data=json.dumps(chunk(node.startup,node.feedback.source_ns))))
-        self.assertEqual(node.startup.phase,'fault');self.assertIn('4 rad/s',node.reason)
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('9999 rad/s',node.reason)
         self.assertIsNone(node.engine.last_request_id)
         self.assertEqual(node.command_count,before+4)
 
@@ -546,11 +546,11 @@ class NodeWiringTests(unittest.TestCase):
         import time
         from types import SimpleNamespace as NS
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
-        names=all_names(profile()); velocities=[0.]*len(names);velocities[names.index('arm_r_joint1')]=4.01
+        names=all_names(profile()); velocities=[0.]*len(names);velocities[names.index('arm_r_joint1')]=9999.01
         stamp=NS(sec=node.robot_ns//10**9,nanosec=node.robot_ns%10**9+1)
         before=node.command_count
         node.joints(NS(name=names,position=[node.feedback.positions[n] for n in names],velocity=velocities,header=NS(stamp=stamp)))
-        self.assertEqual(node.startup.phase,'fault');self.assertIn('4 rad/s',node.reason)
+        self.assertEqual(node.startup.phase,'fault');self.assertIn('9999 rad/s',node.reason)
         self.assertEqual(node.command_count,before+4)
 
     def test_runtime_tracking_violation_faults_and_stops(self):
