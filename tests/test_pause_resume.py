@@ -66,20 +66,23 @@ class CurrentPoseTests(unittest.TestCase):
             data=chunk(start,now,cycle=engine.cycle)
             self.assertEqual(engine.accept(data,frame,now)['arm_right']['message']['points'][0]['positions'],data['positions'][0])
 
-    def test_in_progress_homing_blocks_capture_even_if_goal_predates_startup(self):
-        p,start=self.startup();start.homing_status('arm_right',2,BASE-1)
-        for i in range(12):
-            now=BASE+i*50_000_000;start.update(feedback(p,now),now)
-        self.assertIsNone(start.hold)
-        start.homing_status('arm_right',4,BASE-1)
+    def test_controller_action_statuses_do_not_block_current_pose_capture(self):
+        p,start=self.startup()
         for i in range(11):
-            now=BASE+600_000_000+i*50_000_000;start.update(feedback(p,now),now)
+            now=BASE+i*50_000_000
+            start.homing_status('arm_right',[1,2,6,6,4][i%5],now)
+            start.update(feedback(p,now),now)
         self.assertEqual(start.phase,'ready')
 
-    def test_failed_active_homing_is_not_ignored(self):
-        _,start=self.startup();start.homing_status('arm_right',2,BASE-1)
-        with self.assertRaises(BridgeError):start.homing_status('arm_right',6,BASE-1)
-        self.assertEqual(start.phase,'fault')
+    def test_completed_aborted_and_active_goals_cannot_fault_current_mode(self):
+        p,start=self.startup()
+        for i in range(11):
+            now=BASE+i*50_000_000;start.update(feedback(p,now),now)
+        previous=start.epoch;hold=dict(start.hold)
+        for group in GROUPS:
+            for value in [6,6,4,1,2]:start.homing_status(group,value,now+1)
+        self.assertEqual(start.phase,'ready');self.assertEqual(start.epoch,previous)
+        self.assertEqual(start.hold,hold)
 
 
 class PauseTests(unittest.TestCase):

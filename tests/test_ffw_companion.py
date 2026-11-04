@@ -346,7 +346,7 @@ class NodeWiringTests(unittest.TestCase):
                 sys.modules.pop(name)
         cls.folder.cleanup()
 
-    def node(self, mode):
+    def node(self, mode, *, require_homing=True):
         from types import SimpleNamespace as NS, ModuleType
         from unittest import mock
         class Message:
@@ -363,11 +363,14 @@ class NodeWiringTests(unittest.TestCase):
             def __init__(self, name):
                 self.name,self.robot_ns,self.pubs,self.foreign=name,BASE,[],set()
                 self.show_own=True
+                self.subscriptions=[]
             def get_parameter(self, name): return NS(value=False)
             def get_clock(self): return NS(now=lambda:NS(nanoseconds=self.robot_ns))
             def create_publisher(self, typ, topic, qos):
                 value=Pub(typ,topic);self.pubs.append(value);return value
-            def create_subscription(self,*args):return NS()
+            def create_subscription(self,*args):
+                self.subscriptions.append(args)
+                return NS()
             def create_client(self,*args):return Client()
             def create_timer(self,*args):return Timer()
             def get_name(self):return self.name
@@ -393,7 +396,7 @@ class NodeWiringTests(unittest.TestCase):
         modules['controller_manager_msgs.srv'].ListControllers=NS(Request=Message)
         p=profile();home=load_home_yaml(HOME,p)
         with mock.patch.dict(sys.modules,modules):
-            node=self.module.make_node(p,home,mode)
+            node=self.module.make_node(p,home,mode,require_homing=require_homing)
         patcher=mock.patch.object(self.module,'joint_trajectory',lambda data:NS(data=data));patcher.start();self.addCleanup(patcher.stop)
         node.trajectory_class=Trajectory
         return node
@@ -444,6 +447,18 @@ class NodeWiringTests(unittest.TestCase):
         node.foreign.add(profile()['commands']['arm_right']['topic']);node.tick()
         self.assertEqual(node.startup.phase,'fault')
         self.assertEqual(node.command_count,0)
+
+    def test_current_mode_has_no_homing_subscriptions_and_ignores_controller_status(self):
+        import time
+        from types import SimpleNamespace as NS
+        node=self.make_ready(self.node('execute',require_homing=False))
+        self.assertFalse(any('/_action/status' in args[1] for args in node.subscriptions))
+        node.controller_ok_at=time.monotonic();node.tick()
+        epoch=node.startup.epoch;before=node.command_count
+        stamp=NS(sec=(node.robot_ns+1)//10**9,nanosec=(node.robot_ns+1)%10**9)
+        node.homing('arm_right',NS(status_list=[NS(status=s,goal_info=NS(stamp=stamp)) for s in [6,6,4,2]]))
+        self.assertEqual(node.startup.phase,'ready');self.assertEqual(node.startup.epoch,epoch)
+        self.assertEqual(node.command_count,before)
 
     def test_new_external_homing_is_not_preempted_by_a_stop_command(self):
         import time

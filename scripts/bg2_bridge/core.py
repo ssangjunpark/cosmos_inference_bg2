@@ -160,26 +160,15 @@ class Startup:
         self.profile, self.home, self.started_ns, self.settle_ns = profile, home, started_ns, settle_ns
         self.require_homing = require_homing
         self.phase, self.epoch = "initializing" if require_homing else "settling", uuid.uuid4().hex
-        self.current_anchor, self.active_homing = None, {}
+        self.current_anchor = None
         self.completed, self.hold = set(), None
         self.goal_starts = {}
         self.stable_since = self.last_feedback_ns = None
 
     def homing_status(self, group, status, goal_started_ns):
         require(group in GROUPS, "Unknown homing group")
-        if not self.require_homing and self.phase == "settling":
-            previous = self.goal_starts.get(group, -1)
-            if goal_started_ns < previous:
-                return
-            self.goal_starts[group] = goal_started_ns
-            if status in (1, 2):
-                self.active_homing[group] = goal_started_ns
-                self.stable_since, self.current_anchor = None, None
-            elif status in (4, 5, 6):
-                if status in (5, 6) and (group in self.active_homing or goal_started_ns >= self.started_ns):
-                    self.phase = "fault"
-                    raise BridgeError(f"Homing failed: {group}")
-                self.active_homing.pop(group, None)
+        # Current-pose mode does not infer homing from controller action statuses.
+        if not self.require_homing:
             return
         if goal_started_ns < self.started_ns:
             return
@@ -217,9 +206,6 @@ class Startup:
             return
         self.last_feedback_ns = feedback.source_ns
         if not self.require_homing:
-            if self.active_homing:
-                self.stable_since, self.current_anchor = None, None
-                return
             for group in GROUPS:
                 names = self.profile["commands"][group]["joint_names"]
                 check_positions(names, [feedback.positions[n] for n in names], self.profile)

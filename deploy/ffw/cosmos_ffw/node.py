@@ -41,9 +41,10 @@ def make_node(profile, home, mode, *, require_homing=True):
             self.create_subscription(String, topics.get("control", "/cosmos/bg2/control"), self.control, 1)
             status_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                                     durability=DurabilityPolicy.TRANSIENT_LOCAL)
-            for group, data in home.items():
-                self.create_subscription(GoalStatusArray, data["status_topic"],
-                                         lambda msg, group=group: self.homing(group, msg), status_qos)
+            if require_homing:
+                for group, data in home.items():
+                    self.create_subscription(GoalStatusArray, data["status_topic"],
+                                             lambda msg, group=group: self.homing(group, msg), status_qos)
             self.controller_client = self.create_client(ListControllers, "/controller_manager/list_controllers")
             self.timer = self.create_timer(.05, self.tick)
             self.health_timer = self.create_timer(.25, self.query_controllers)

@@ -26,6 +26,8 @@ follower or a competing VR/teleoperation publisher. The companion defaults to
 captures the measured pose. It does not require another home move, including after
 a companion restart. Current-pose settling uses the YAML position tolerance and the existing
 2 rad/s angular limit; the original linear lift settling tolerance is retained; finite feedback, controller health and ownership checks remain.
+Current mode does not subscribe to or act on controller homing/action statuses.
+Completed or aborted controller goals therefore cannot falsely invalidate it.
 If you want a specific initial pose, put the robot there using ROBOTIS first.
 `COSMOS_INITIALIZATION=homing` restores the optional fresh-homing requirement.
 
