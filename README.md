@@ -167,3 +167,21 @@ When the supplied training bundle is available, they also compare exact pixels a
 first, middle, and tail samples against its actual loader. Set `BG2_TRAINING_BUNDLE` if that
 bundle is elsewhere; this reference check is skipped when the bundle is absent. GPU inference
 additionally needs the completed Docker image and matching assets.
+
+## Portable FFW companion
+
+Prepare a small, self-contained folder on the PRO 6000 server for later SFTP:
+
+```bash
+python3 scripts/package_ffw.py --output outputs/ffw_bundle
+```
+
+This command never transfers files or contacts either remote machine. The bundle contains
+a native ROS 2 companion, Docker/Compose files, a reference profile, and file checksums.
+It defaults to preview and leaves existing ROBOTIS bringup/driver containers alone.
+
+Read [FFW bundle documentation](deploy/ffw/README.md) for the chunk wire protocol and
+request/execution lifecycle. The 5090 forwards complete timestamped chunks; FFW validates
+and submits the remaining points to its existing trajectory controllers. New requests
+overlap execution; starvation produces a local hold. The 5090/server network transport
+and sustained latency validation remain unfinished. No bundle has been sent to FFW.

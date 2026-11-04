@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!run.sh
+!cosmos_ffw/
+!cosmos_ffw/**
+cosmos_ffw/__pycache__/

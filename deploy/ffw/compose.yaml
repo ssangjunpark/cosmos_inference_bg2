@@ -1,0 +1,29 @@
+name: cosmos-ffw
+services:
+  companion:
+    build:
+      context: .
+      args:
+        ROBOTIS_IMAGE: ${ROBOTIS_IMAGE:-robotis/ai-worker:2.2.8}
+    image: cosmos-ffw-companion:local
+    container_name: cosmos-ffw-companion
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+    stop_grace_period: 3s
+    pids_limit: 128
+    mem_limit: 512m
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    environment:
+      ROS_DISTRO: jazzy
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-30}
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_LOG_DIR: /tmp/cosmos-ros-logs
+      ZENOH_CONFIG_OVERRIDE: 'mode="client";connect/endpoints=["tcp/127.0.0.1:7447"];scouting/multicast/enabled=false;transport/shared_memory/enabled=false'
+    volumes:
+      - ${FFW_PROFILE:-./config/profile.reference.json}:/config/profile.json:ro
+      - ${FFW_INITIAL_POSITIONS:-/home/robotis/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/ffw_bg2_follower_initial_positions.yaml}:/config/initial_positions.yaml:ro
+    command: ["--profile", "/config/profile.json", "--initial-positions", "/config/initial_positions.yaml", "--mode", "${COSMOS_MODE:-preview}"]

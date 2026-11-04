@@ -83,7 +83,7 @@ class ZenohTransport:
             raise
 
     def check_ownership(self):
-        self.guard_error = "Controller ownership check in progress"
+        # Keep the previous good lease valid while refreshing it.
         try:
             response = self.controller_client.call()
             require(response is not None, "Controller-manager query timed out")

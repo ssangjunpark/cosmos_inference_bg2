@@ -1,6 +1,7 @@
 # Bridge implementation handoff
 
-Paused at the user's explicit request. Resume only when the user asks.
+The user subsequently resumed work to prepare a local FFW folder for later SFTP.
+Both remote machines must remain unchanged; no transfer is authorized yet.
 
 ## Constraints
 
@@ -76,3 +77,26 @@ Read [FFW inspection results](ffw_read_only_inspection_20261104.md) before resum
 In particular, use the actual installed source revision, distinguish installed containers
 from inactive robot services, and do not feed eight-joint Cosmos output into the existing
 10-value end-effector adapter. Existing robot-side controller functionality should be reused.
+
+## Local FFW bundle milestone (2026-11-04)
+
+Implemented the robot-side companion in `deploy/ffw`, sharing the startup/trajectory
+core through the whitelist-only `scripts/package_ffw.py` builder. Generated payloads
+under `outputs/` are standalone and contain no model, SDK checkout, driver, or weights.
+
+- Whole timed chunks go to existing FFW JointTrajectoryControllers, which interpolate
+  them. No second 100 Hz motor loop or EE10 IK layer is added on the 5090.
+- Added transactional chunk replacement, session/request checks, original forecast
+  timestamps, expiration holds, feedback/ownership/health checks, and preview mode.
+- Fixed the earlier ownership refresh lease issue and invalidated sessions on external
+  rehoming; old holds cannot preempt the new homing action.
+- Added a tested RequestPlanner for asynchronous prefetch. The actual 5090/server
+  network request path is still unfinished; Unix sockets do not span these hosts.
+- Local tests cover core lifecycle, ROS-node wiring through mocks, and bundle portability.
+  Native ROS 2 Jazzy CDR trajectory serialization was also checked without ROS initialization.
+- No remote machine was contacted or modified during this bundle implementation.
+
+Next: finish the 5090 gateway and PRO network RPC, validate raw camera transforms,
+measure warmed end-to-end latency, then commission the companion with the actual
+installed controllers/profile. Current first-call inference timings do not fit 0.8 s.
+The old co-located `robotis_bridge.py` execute path remains a legacy draft for this topology.

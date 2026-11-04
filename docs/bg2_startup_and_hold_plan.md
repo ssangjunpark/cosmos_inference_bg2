@@ -6,11 +6,14 @@ that communicates with the physical ROBOTIS FFW-BG2.
 Recorded-observation inference has passed for both Edge and Nano. Hardware integration
 is now being prepared locally. The `3sp5090` inference PC is restricted to read-only
 inspection: no file edits, installs, container restarts, homing, or controller changes there.
-Robot communication, homing coordination, and hold behavior are not implemented yet.
+A local FFW companion now implements homing/hold coordination and chunk submission
+for later deployment. It has been checked offline; live commissioning and the 5090 ↔ PRO
+6000 network gateway remain pending. See [FFW bundle](../deploy/ffw/README.md).
 
 ## Agreed behavior
 
-The inference PC runs Cosmos. The robot's existing ROBOTIS controllers and DYNAMIXEL
+The PRO 6000 server runs Cosmos; the 5090 is the observation/inference gateway.
+The robot's existing ROBOTIS controllers and DYNAMIXEL
 hardware interface execute position targets and retain responsibility for low-level motor
 control. LeRobot is not a required runtime dependency.
 
@@ -174,12 +177,12 @@ and head letterboxing after establishing the source orientation.
 Use the verified output decoder from the [inference pipeline implementation plan](inference_pipeline_plan.md).
 Continue local implementation while keeping `3sp5090` read-only.
 
-1. Add configurable startup/hold coordination with states for initialization, settling,
-   capture, ready, running, and failure. Test it against mocked feedback/controllers.
+1. Local FFW startup/hold coordination and offline/mock tests are implemented; commission
+   them against the installed controllers only after deployment is authorized.
 2. Add the live observation adapter after verifying camera orientation, and add a persistent
    inference interface using the already integrated training adapter.
-3. Add an offline trajectory builder and inspector that validate joint names, shapes, units,
-   timestamps, finite values, limits, and target changes before constructing commands.
+3. The tested chunk builder validates names, shape, units, timestamps, finite positions,
+   reference limits, tracking, and velocity. Confirm real hardware limits/profile before use.
 4. Benchmark warmed repeated inference and choose timestamp handling and execution cadence.
 5. Verify live feedback and controller ownership before exercising the complete command path.
 

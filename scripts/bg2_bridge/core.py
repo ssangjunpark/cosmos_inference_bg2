@@ -120,10 +120,10 @@ def load_home_yaml(path: Path, profile):
         key = controller.replace("_controller", "_joint_trajectory_executor")
         data = executors[key]["ros__parameters"]
         names = data["joint_names"]
-        require(set(names) == set(profile["commands"][group]["joint_names"]), f"Homing joint mismatch: {group}")
+        require(len(names) == len(set(names)) and set(names) == set(profile["commands"][group]["joint_names"]), f"Homing joint mismatch: {group}")
         positions = data[data["step_names"][-1]]
         require(len(names) == len(positions), "Homing pose shape mismatch")
-        require(data["action_topic"].endswith("/follow_joint_trajectory"), "Invalid homing action")
+        require(data["action_topic"] == f"/{controller}/follow_joint_trajectory", "Invalid homing action")
         pose = dict(zip(names, map(float, positions)))
         for name, value in pose.items():
             limit = profile["reference_limits"][name]
@@ -131,6 +131,8 @@ def load_home_yaml(path: Path, profile):
         targets[group] = {"positions": pose, "position_tolerance": float(data["position_tolerance"]),
                           "velocity_tolerance": float(data["velocity_tolerance"]),
                           "status_topic": data["action_topic"] + "/_action/status"}
+        require(all(math.isfinite(targets[group][k]) and targets[group][k] >= 0 for k in ("position_tolerance", "velocity_tolerance")),
+                "Invalid homing tolerances")
         # ROS action transport uses /<action-name>/_action/status.
     return targets
 
@@ -140,11 +142,28 @@ class Startup:
         self.profile, self.home, self.started_ns, self.settle_ns = profile, home, started_ns, settle_ns
         self.phase, self.epoch = "initializing", uuid.uuid4().hex
         self.completed, self.hold = set(), None
+        self.goal_starts = {}
         self.stable_since = self.last_feedback_ns = None
 
     def homing_status(self, group, status, goal_started_ns):
-        if self.phase not in ("initializing", "settling") or goal_started_ns < self.started_ns:
+        require(group in GROUPS, "Unknown homing group")
+        if goal_started_ns < self.started_ns:
             return
+        if self.phase in ("ready", "running", "holding"):
+            if goal_started_ns > self.goal_starts.get(group, -1):
+                # An external homing action now owns the controllers. Do not send a
+                # stop/hold trajectory that would preempt that action.
+                self.phase, self.hold, self.epoch = "fault", None, uuid.uuid4().hex
+                raise BridgeError("New homing started; discard this inference session")
+            return
+        if self.phase not in ("initializing", "settling"):
+            return
+        if goal_started_ns < self.goal_starts.get(group, -1):
+            return
+        if goal_started_ns > self.goal_starts.get(group, -1):
+            self.completed.discard(group)
+            self.goal_starts[group] = goal_started_ns
+            self.phase, self.stable_since = "initializing", None
         if status in (5, 6):
             self.phase = "fault"
             raise BridgeError(f"Homing failed: {group}")
@@ -194,7 +213,7 @@ def message(names, rows, offsets, start_ns):
 
 def trajectories(prediction, feedback, startup, now_ns, *, lead_ns=20_000_000, velocity_scale=0.25,
                  tracking_tolerance=0.1, prefix=16):
-    require(startup.phase in ("ready", "running") and startup.hold is not None, "Initialization and hold capture are incomplete")
+    require(startup.phase in ("ready", "running", "holding") and startup.hold is not None, "Initialization and hold capture are incomplete")
     feedback.fresh(now_ns)
     require(prediction.get("epoch") == startup.epoch, "Prediction belongs to another initialization session")
     require(prediction.get("joint_names") == startup.profile["policy"]["joint_names"], "Prediction joint order mismatch")
