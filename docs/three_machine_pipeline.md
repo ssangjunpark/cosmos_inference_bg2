@@ -5,6 +5,8 @@ Gateway software is installed and tested on 3sp5090 at the user's request. FFW r
 unchanged; no robot services or motion commands have been started by this setup.
 The reference hardware profile deliberately remains non-executable.
 See the [5090 setup record](5090_setup_20261104.md) for the installed location and checks.
+The [FFW startup review](ffw_startup_review_20261104.md) maps the official follower
+bringup to our companion, homing, camera checks and inference startup.
 
 Rendered diagram: [PNG](diagrams/three_machine_pipeline.png),
 [SVG for zooming/printing](diagrams/three_machine_pipeline.svg),

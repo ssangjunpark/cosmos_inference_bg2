@@ -78,6 +78,15 @@ and the pinned SDK submodule. `transfer/README.md` explains edit versus copy loc
 Both package scripts default to the new paths. Previous generated bundles are preserved
 under `.runtime/bundle_archive/`; inference outputs remain under `outputs/`.
 
+## FFW startup review
+
+The user requested documentation review before FFW setup. A fresh read-only check
+found the existing containers up but no follower controller/camera processes. The
+installed image supplies companion dependencies; domain 30/rmw_zenoh_cpp and launch/home
+file hashes were checked. See [FFW startup review](ffw_startup_review_20261104.md).
+Start the preview companion before follower initialization. Follower bringup performs
+real homing and has not been started; FFW remains unchanged.
+
 ## Remaining physical work
 
 1. Verify raw camera dimensions, orientation and field of view against training preparation.
