@@ -7,18 +7,20 @@ Use the [three-machine runbook](three_machine_pipeline.md) for commands and topo
 ## Constraints
 
 - All code is in the local cosmos_inference_bg2 repository on PRO 6000.
-- 3sp5090 and FFW remain strictly read-only. This implementation made no remote connections,
-  transfers, installs, container changes, homing calls, or motion commands.
+- The user authorized installing the gateway on 3sp5090. FFW remains strictly read-only:
+  no file changes, container changes, homing calls, or motion commands there.
+- The user explicitly requested removing the extra API password. RPC now relies on
+  localhost endpoints through SSH; do not reintroduce a token file or password check.
 - Commit major milestones locally; never push without a new explicit instruction.
-- Keep weights, assets, observations, generated bundles, logs, caches, and token files ignored.
+- Keep weights, assets, observations, generated bundles, logs and caches ignored.
   Upstream Framework, ai_worker, and Zenoh SDK remain pinned and unchanged.
 - Do not guess camera transforms or enabled hardware configuration.
 
 ## Implemented entry points
 
-- `scripts/cosmos3.py serve`: protected Docker launch, localhost HTTP port, private token,
+- `scripts/cosmos3.py serve`: protected Docker launch, localhost HTTP port,
   verified DCP/assets, recorded-input warmup. `scripts/inference_server.py` uses one persistent
-  model on one GPU thread with authenticated bounded requests and no request queue.
+  model on one GPU thread with bounded requests and no request queue.
 - `scripts/gateway.py`: inspect, replay, preview, execute. Align three views and measured
   joints, use original FFW timestamps and local monotonic elapsed times, one async request,
   discard stale/old-epoch replies, prefetch during execution, forward chunks only.
@@ -44,7 +46,7 @@ transport are legacy co-located drafts. They are not the deployment path for thi
 - Real SDK pub/sub passed on loopback with bundled schemas and runtime downloads forbidden,
   also inside the built read-only, network-disabled Python 3.12 gateway container.
 - Existing local native Jazzy CDR trajectory serialization checks passed.
-- Real step-20000 Edge and Nano warmed services each processed five authenticated HTTP
+- Real step-20000 Edge and Nano warmed services each processed five HTTP
   recorded-input requests, returning finite 16×8 absolute radian positions. Original
   observation timestamps are preserved. Median/max: Edge 0.231/0.293 s, Nano 0.401/0.440 s.
 - Actual Edge reply passes the FFW trajectory validator at worst observed local latency
@@ -55,7 +57,7 @@ transport are legacy co-located drafts. They are not the deployment path for thi
   and actuator stopping remain unverified; see the runbook failure-case matrix.
 - Synthetic three-camera/joint observations traverse the actual HTTP service, asynchronous
   gateway, and FFW chunk executor. Negative cases cover clocks, expiry, old epochs,
-  homing, ownership, stale feedback/status, model concurrency, and authentication.
+  homing, ownership, stale feedback/status, model concurrency, and password-free localhost RPC.
 - Local test model containers were stopped after measurements; no model server is left
   running as an unintended deployment.
 
@@ -65,7 +67,7 @@ The user requested minimal changes and reuse of existing software. The FFW launc
 now uses the installed image directly instead of building a derived image. The 39
 affected FFW tests pass and Docker Compose configuration validation passes locally.
 The refreshed generated `transfer/ffw/` folder contains the code and Compose file for later copy;
-no remote machine was contacted or modified. The 5090 setup is unchanged.
+no remote machine was contacted or modified. The 5090 setup is now authorized and underway.
 
 ## Transfer-folder layout
 
@@ -81,11 +83,11 @@ under `.runtime/bundle_archive/`; inference outputs remain under `outputs/`.
 2. Confirm actual home YAML, installed 2.2.8 controller interfaces/limits and exclusive
    ownership. The earlier inspection found no active robot services. The reference profile
    stays disabled; alternate head target 0.78 violates the reference 0.6951 limit.
-3. Supply the PRO 6000 SSH destination from 5090, transfer the reviewed small bundles/token
-   only when authorized, and measure real network timing and sustained jitter.
+3. Use the existing PRO 6000-to-5090 SSH alias for a reverse localhost forward; verify
+   sustained timing/jitter. Only transfer the FFW folder when authorized.
 4. Start preview companion before fresh ROBOTIS homing, exercise end-to-end chunk acceptance,
    then commission supervised execute mode, tracking, shutdown and starvation behavior.
 
-The user has not authorized transfer or modifying either remote machine. Do not interpret
+The user authorized 5090 setup, not modifying FFW or running robot execution. Do not interpret
 local software completion as live hardware verification. Edge is the initial deployment
 example; Nano timing and the observed gripper-limit rejection need evaluation before motion.

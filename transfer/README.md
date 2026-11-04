@@ -6,8 +6,8 @@
 | `5090/` | 5090 communication PC | Gateway Python code, pinned SDK, message definitions, dependency lock, Docker/Compose files and reference profile. |
 
 Copy the complete named folder, including hidden files, when deployment is authorized.
-Nothing in this directory is automatically transferred or started. The server token is
-not included: it must be supplied separately to the 5090, with restrictive permissions.
+Nothing in this directory is automatically transferred or started. The inference service
+uses localhost endpoints through SSH; no API password file needs to be supplied.
 Live camera/controller configuration still needs verification; preview is the default.
 
 ## Where to edit versus what to copy

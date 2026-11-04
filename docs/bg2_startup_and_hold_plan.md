@@ -73,7 +73,7 @@ position and velocity tolerances. The startup supervisor must wait for actual co
 
 Keep a persistent GPU inference worker and a separate ROS 2 communication bridge. The 5090 gateway
 collects feedback and cameras using the installed-stack-matched Zenoh SDK, sends prepared
-observations over an authenticated SSH-tunneled HTTP connection to PRO 6000, and forwards
+observations over an SSH-tunneled HTTP connection to PRO 6000, and forwards
 whole timestamped chunks. The FFW companion validates and sends right-arm trajectories
 to existing controllers. The [implemented three-machine runbook](three_machine_pipeline.md)
 replaces the earlier co-located local-IPC proposal. All code remains local until deployment.

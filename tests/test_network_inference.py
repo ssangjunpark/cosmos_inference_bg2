@@ -1,4 +1,4 @@
-"""Authenticated localhost RPC checks with a CPU fake policy; no ROS or robot connection."""
+"""Localhost RPC checks with a CPU fake policy; no ROS or robot connection."""
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import http.client
@@ -19,10 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from bg2_inference import FORMAT, JOINT_NAMES
 from bg2_bridge.core import BridgeError
-from bg2_bridge.rpc import InferenceClient, decode_observation, encode_observation, token_from_file, MAX_OBSERVATION
+from bg2_bridge.rpc import InferenceClient, decode_observation, encode_observation, MAX_OBSERVATION
 from inference_server import PolicyService, make_server
-
-TOKEN = 'local-test-token-with-at-least-24-characters'
 
 
 def observation(timestamp=10_000_000_000):
@@ -47,11 +45,11 @@ class FakePolicy:
 class RpcTests(unittest.TestCase):
     def setUp(self):
         self.service=PolicyService(FakePolicy,{},observation(),2)
-        self.server=make_server(('127.0.0.1',0),self.service,TOKEN)
+        self.server=make_server(('127.0.0.1',0),self.service)
         self.thread=threading.Thread(target=self.server.serve_forever,kwargs={'poll_interval':.01},daemon=True)
         self.thread.start()
         self.port=self.server.server_address[1]
-        self.client=InferenceClient(f'http://127.0.0.1:{self.port}',TOKEN,timeout=5)
+        self.client=InferenceClient(f'http://127.0.0.1:{self.port}',timeout=5)
     def tearDown(self):
         if self.service.policy.block is not None:self.service.policy.block.set()
         self.server.shutdown();self.server.server_close();self.thread.join(2);self.service.close()
@@ -68,9 +66,13 @@ class RpcTests(unittest.TestCase):
         self.assertEqual(len(set(self.service.policy.threads)),1)
         self.assertEqual(self.client.health()['prediction_calls'],3)
 
-    def test_bad_authentication_is_rejected(self):
-        with self.assertRaisesRegex(BridgeError,'Authentication'):
-            InferenceClient(f'http://127.0.0.1:{self.port}','wrong').health()
+    def test_health_and_prediction_work_without_an_api_password(self):
+        connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=3)
+        connection.request('GET','/health')
+        response=connection.getresponse()
+        self.assertEqual(response.status,200)
+        self.assertTrue(json.loads(response.read())['ok']);connection.close()
+        self.assertTrue(self.client.predict(observation(),uuid.uuid4().hex,uuid.uuid4().hex)['ok'])
 
     def test_second_inference_request_is_rejected_instead_of_queued(self):
         gate=threading.Event();self.service.policy.block=gate
@@ -86,8 +88,7 @@ class RpcTests(unittest.TestCase):
 
     def test_bad_archive_and_identity_release_the_busy_slot(self):
         connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=3)
-        connection.request('POST','/predict',body=b'bad',headers={'Authorization':'Bearer '+TOKEN,
-            'Content-Type':'application/x-npz','X-Session-Epoch':'../escape','X-Request-ID':uuid.uuid4().hex})
+        connection.request('POST','/predict',body=b'bad',headers={'Content-Type':'application/x-npz','X-Session-Epoch':'../escape','X-Request-ID':uuid.uuid4().hex})
         response=connection.getresponse();self.assertEqual(response.status,400);response.read();connection.close()
         self.assertTrue(self.client.predict(observation(),uuid.uuid4().hex,uuid.uuid4().hex)['ok'])
 
@@ -115,20 +116,27 @@ class WireValidationTests(unittest.TestCase):
 
     def test_plain_remote_urls_and_embedded_credentials_are_rejected(self):
         for url in ['http://192.168.0.14:8008','http://user:password@127.0.0.1:8008','http://127.0.0.1:8008/path']:
-            with self.assertRaises(BridgeError):InferenceClient(url,TOKEN)
+            with self.assertRaises(BridgeError):InferenceClient(url)
 
-    def test_token_permissions_and_symlinks(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/'token';path.write_text(TOKEN);path.chmod(0o600)
-            self.assertEqual(token_from_file(path),TOKEN)
-            path.chmod(0o644)
-            with self.assertRaises(BridgeError):token_from_file(path)
-            path.chmod(0o600);link=Path(directory)/'link';link.symlink_to(path)
-            with self.assertRaises(BridgeError):token_from_file(link)
+    def test_client_sends_no_authorization_header(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        seen=[]
+        class Capture(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.headers.get('Authorization'))
+                payload=json.dumps({'ok':True,'warmed':True,'joint_names':JOINT_NAMES,'future_steps':16,'frame_interval_ns':50_000_000}).encode()
+                self.send_response(200);self.end_headers();self.wfile.write(payload)
+            def log_message(self,*_):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Capture)
+        thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
+        try:
+            self.assertTrue(InferenceClient(f'http://127.0.0.1:{server.server_address[1]}').health()['ok'])
+            self.assertEqual(seen,[None])
+        finally:server.shutdown();server.server_close();thread.join(2)
 
 
 class ServeLauncherTests(unittest.TestCase):
-    def test_dry_run_is_loopback_only_and_does_not_create_credentials(self):
+    def test_dry_run_is_loopback_only_and_needs_no_password_file(self):
         from argparse import Namespace
         from unittest import mock
         import cosmos3
@@ -137,9 +145,8 @@ class ServeLauncherTests(unittest.TestCase):
             (tokenizer/'tokenizer_config.json').write_text('{}')
             vae=root/'vae.pth';vae.write_bytes(b'vae')
             sample=root/'sample.npz';sample.write_bytes(b'sample')
-            secret=root/'new-token'
             args=Namespace(checkpoint_root=root,variant='edge',step=20000,tokenizer=tokenizer,vae=vae,
-                           warmup_observation=sample,port=8008,warmup_runs=2,token_file=secret,dry_run=True,
+                           warmup_observation=sample,port=8008,warmup_runs=2,dry_run=True,
                            gpu='5',adapter_dir=cosmos3.ROOT/'adapters',image='base',seed=0,steps=4,
                            guidance=3.,shift=5.,guidance_interval=None)
             with mock.patch.object(cosmos3,'published_checkpoint',return_value=root), mock.patch.object(cosmos3,'checked') as execute:
@@ -150,9 +157,10 @@ class ServeLauncherTests(unittest.TestCase):
             self.assertIn('--read-only',command)
             self.assertIn('--gpus=device=5',command)
             self.assertNotIn('--privileged',command)
-            self.assertFalse(secret.exists())
+            self.assertNotIn('--token-file',command)
+            self.assertFalse(any('/run/secrets' in item for item in command))
             for i,item in enumerate(command[:-1]):
-                if item=='--mount' and any('target='+target in command[i+1] for target in ['/checkpoint','/input','/assets','/adapter','/run/secrets']):
+                if item=='--mount' and any('target='+target in command[i+1] for target in ['/checkpoint','/input','/assets','/adapter']):
                     self.assertTrue(command[i+1].endswith(',readonly'))
 
 

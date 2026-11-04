@@ -58,9 +58,9 @@ digraph cosmos_bg2 {
       <TR><TD PORT="status" HEIGHT="95" ALIGN="LEFT"><B>Use fresh FFW status</B><BR ALIGN="LEFT"/>Matching preview/execute mode + session<BR ALIGN="LEFT"/>Explicit stop goes back to FFW<BR ALIGN="LEFT"/></TD></TR>
       <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
         <B>SSH tunnel runs on this PC</B><BR/><BR ALIGN="LEFT"/>
-        Local endpoint: 127.0.0.1:8008<BR ALIGN="LEFT"/>
-        SSH destination: PRO 6000<BR ALIGN="LEFT"/>
-        SSH port: configured value (usually 22)<BR ALIGN="LEFT"/>
+        Tunnel endpoint: 127.0.0.1:8008<BR ALIGN="LEFT"/>
+        PRO 6000 opens reverse SSH to 5090<BR ALIGN="LEFT"/>
+        5090 SSH port: 55031<BR ALIGN="LEFT"/>
       </TD></TR>
     </TABLE>
   >];
@@ -84,7 +84,7 @@ digraph cosmos_bg2 {
         Load once; warm before listening<BR ALIGN="LEFT"/>
         Keep model on the selected GPU<BR ALIGN="LEFT"/>
       </TD></TR>
-      <TR><TD HEIGHT="95" ALIGN="LEFT"><B>HTTP authentication</B><BR ALIGN="LEFT"/>Bearer token from a private file<BR ALIGN="LEFT"/>SSH encrypts the cross-machine connection<BR ALIGN="LEFT"/></TD></TR>
+      <TR><TD HEIGHT="95" ALIGN="LEFT"><B>SSH transport</B><BR ALIGN="LEFT"/>No API password file<BR ALIGN="LEFT"/>SSH encrypts the cross-machine connection<BR ALIGN="LEFT"/></TD></TR>
       <TR><TD HEIGHT="145" ALIGN="LEFT" BGCOLOR="white">
         <B>Timing contract</B><BR/><BR ALIGN="LEFT"/>
         16 waypoints x 50 ms = 0.8 s horizon<BR ALIGN="LEFT"/>
@@ -111,7 +111,7 @@ digraph cosmos_bg2 {
       <TR><TD PORT="reply" HEIGHT="80">PREDICTION RESPONSE<BR/>16 x 8 positions + IDs<BR/>JSON / HTTP response</TD></TR>
       <TR><TD HEIGHT="230"></TD></TR>
       <TR><TD HEIGHT="95"></TD></TR>
-      <TR><TD HEIGHT="145">SSH uses its configured port<BR/>(usually 22; not yet confirmed)<BR/>PRO 6000 SSH alias still needed</TD></TR>
+      <TR><TD HEIGHT="145">Reverse SSH from PRO 6000<BR/>Existing alias: 3sp5090<BR/>SSH service port: 55031</TD></TR>
     </TABLE>
   >];
   ffw:obs:e -> zenoh:obs:w [color="#08765E", arrowhead=none];

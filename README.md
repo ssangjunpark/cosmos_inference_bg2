@@ -147,7 +147,7 @@ in the [implementation plan](docs/inference_pipeline_plan.md).
 
 Model runtime containers have a read-only filesystem and run as your UID/GID. One-shot inference
 and doctor disable networking; the persistent server publishes only a localhost HTTP port
-for an authenticated SSH-tunnel connection from the 5090.
+for an SSH-tunneled connection from the 5090; no API password file is required.
 Only the selected checkpoint, tokenizer, VAE, input archive, adapter directory, and local scripts
 are mounted read-only. For a Hugging Face tokenizer snapshot, its model cache repository is
 mounted read-only to preserve links into the adjacent blobs directory. Writable bind mounts are restricted to this workspace's `.runtime/cache/`

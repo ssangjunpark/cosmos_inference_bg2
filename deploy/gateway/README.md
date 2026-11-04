@@ -21,16 +21,16 @@ build from the generated folder, which includes the shared code and SDK.
 
 For later deployment, use the [three-machine runbook](../../docs/three_machine_pipeline.md)
 in the repository. In a copied folder, verify it with `python3 verify_bundle.py`.
-Create `logs/`, copy `.env.example` to `.env`, set your numeric UID/GID and instruction,
-and supply the matching PRO 6000 `inference.token` with mode 600. The token is a separate
-file mount; never put its contents in Compose or Git. Supply a camera-verified profile
-for preview. Choose a new COSMOS_RUN_ID for each run; existing outputs are preserved.
+Create `logs/`, copy `.env.example` to `.env`, and set your numeric UID/GID,
+instruction and camera-verified profile. No API password or credential file is required;
+the model endpoint is reached through the existing SSH connection. Use a reverse
+forward from PRO 6000 to 5090 as shown in the runbook. Choose a new COSMOS_RUN_ID for each run; existing outputs are preserved.
 
 The Docker image uses Python 3.12, exact dependency versions from requirements.lock,
 and unchanged SDK source. Local ROS message definitions prevent SDK runtime downloads
 and Git configuration changes. Host networking is needed for the FFW router and the
 SSH tunnel on the 5090; no inbound gateway port is opened. The root filesystem and
-profile/token mounts are read-only. Only `logs/` and temporary files are writable.
+profile mount are read-only. Only `logs/` and temporary files are writable.
 There are no GPU, serial-device, privileged, or Docker-socket mounts.
 
 Modes:

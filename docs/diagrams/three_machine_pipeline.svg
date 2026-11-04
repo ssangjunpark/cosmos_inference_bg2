@@ -111,12 +111,12 @@
 <text text-anchor="start" x="779.5" y="-190.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Matching preview/execute mode + session</text>
 <text text-anchor="start" x="779.5" y="-176.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Explicit stop goes back to FFW</text>
 <polygon fill="white" stroke="transparent" points="763.5,-1 763.5,-146 1188.5,-146 1188.5,-1 763.5,-1"/>
-<text text-anchor="start" x="811.5" y="-105.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="848.5" y="-105.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">SSH tunnel runs on this PC</text>
-<text text-anchor="start" x="779.5" y="-77.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Local endpoint: 127.0.0.1:8008</text>
-<text text-anchor="start" x="779.5" y="-63.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;SSH destination: PRO 6000</text>
-<text text-anchor="start" x="779.5" y="-49.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;SSH port: configured value (usually 22)</text>
-<text text-anchor="start" x="920.5" y="-35.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;</text>
+<text text-anchor="start" x="807" y="-105.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;</text>
+<text text-anchor="start" x="844" y="-105.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">SSH tunnel runs on this PC</text>
+<text text-anchor="start" x="779.5" y="-77.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Tunnel endpoint: 127.0.0.1:8008</text>
+<text text-anchor="start" x="779.5" y="-63.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;PRO 6000 opens reverse SSH to 5090</text>
+<text text-anchor="start" x="779.5" y="-49.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;5090 SSH port: 55031</text>
+<text text-anchor="start" x="916" y="-35.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;</text>
 <polygon fill="none" stroke="#a7c6f2" points="762,0 762,-822 1189,-822 1189,0 762,0"/>
 </g>
 <!-- gateway&#45;&gt;zenoh -->
@@ -136,9 +136,9 @@
 <text text-anchor="start" x="1293.5" y="-522.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">PREDICTION RESPONSE</text>
 <text text-anchor="start" x="1299.5" y="-507.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">16 x 8 positions + IDs</text>
 <text text-anchor="start" x="1301" y="-492.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">JSON / HTTP response</text>
-<text text-anchor="start" x="1277.5" y="-84.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">SSH uses its configured port</text>
-<text text-anchor="start" x="1269.5" y="-69.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">(usually 22; not yet confirmed)</text>
-<text text-anchor="start" x="1265" y="-54.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">PRO 6000 SSH alias still needed</text>
+<text text-anchor="start" x="1277" y="-84.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Reverse SSH from PRO 6000</text>
+<text text-anchor="start" x="1295.5" y="-69.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Existing alias: 3sp5090</text>
+<text text-anchor="start" x="1292" y="-54.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">SSH service port: 55031</text>
 </g>
 <!-- gateway&#45;&gt;ssh -->
 <g id="edge3" class="edge">
@@ -173,8 +173,8 @@
 <text text-anchor="start" x="1581.5" y="-317.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Load once; warm before listening</text>
 <text text-anchor="start" x="1581.5" y="-303.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;Keep model on the selected GPU</text>
 <text text-anchor="start" x="1740.5" y="-289.8" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;</text>
-<text text-anchor="start" x="1581.5" y="-204.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">HTTP authentication</text>
-<text text-anchor="start" x="1581.5" y="-190.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">Bearer token from a private file</text>
+<text text-anchor="start" x="1581.5" y="-204.3" font-family="DejaVu Sans" font-weight="bold" font-size="14.00" fill="#14243a">SSH transport</text>
+<text text-anchor="start" x="1581.5" y="-190.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">No API password file</text>
 <text text-anchor="start" x="1581.5" y="-176.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a">SSH encrypts the cross&#45;machine connection</text>
 <polygon fill="white" stroke="transparent" points="1565.5,-1 1565.5,-146 1990.5,-146 1990.5,-1 1565.5,-1"/>
 <text text-anchor="start" x="1654" y="-105.3" font-family="DejaVu Sans" font-size="14.00" fill="#14243a"> &#160;&#160;&#160;&#160;&#160;&#160;&#160;</text>

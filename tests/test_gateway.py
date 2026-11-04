@@ -21,7 +21,7 @@ from bg2_bridge.gateway import Gateway,GatewayTransport,StatusCache
 from bg2_bridge.chunks import ChunkExecutor
 from bg2_bridge.rpc import InferenceClient
 from inference_server import PolicyService,make_server
-from test_network_inference import FakePolicy,TOKEN,observation
+from test_network_inference import FakePolicy,observation
 
 ROBOT=1_800_000_000_000_000_000
 MONO=10_000_000_000
@@ -102,9 +102,9 @@ class GatewayTests(unittest.TestCase):
         for key in self.p['cameras']:self.observations.add_camera(key,ROBOT,MONO,image(key))
         self.cache=StatusCache();self.cache.update(status(self.startup.epoch),MONO)
         self.service=PolicyService(FakePolicy,{},observation(),1)
-        self.server=make_server(('127.0.0.1',0),self.service,TOKEN)
+        self.server=make_server(('127.0.0.1',0),self.service)
         self.thread=threading.Thread(target=self.server.serve_forever,kwargs={'poll_interval':.01},daemon=True);self.thread.start()
-        self.client=InferenceClient(f'http://127.0.0.1:{self.server.server_address[1]}',TOKEN)
+        self.client=InferenceClient(f'http://127.0.0.1:{self.server.server_address[1]}')
         self.sent=[]
         def forward(result):
             self.sent.append(result)
@@ -160,7 +160,7 @@ class GatewayTests(unittest.TestCase):
         original=self.gateway.client
         with socket.socket() as unavailable:
             unavailable.bind(('127.0.0.1',0))  # Reserve a local port without a listening service.
-            self.gateway.client=InferenceClient(f'http://127.0.0.1:{unavailable.getsockname()[1]}',TOKEN,timeout=.1)
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{unavailable.getsockname()[1]}',timeout=.1)
             self.gateway.step(MONO);self.finish()
         self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
         self.assertFalse(self.gateway.planner.in_flight)
@@ -185,7 +185,7 @@ class GatewayTests(unittest.TestCase):
         server=socketserver.TCPServer(('127.0.0.1',0),Drop)
         thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
         try:
-            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',TOKEN,timeout=.2)
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',timeout=.2)
             self.gateway.step(MONO);self.finish()
             self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
             self.assertFalse(self.gateway.planner.in_flight)
@@ -203,7 +203,7 @@ class GatewayTests(unittest.TestCase):
         server=ThreadingHTTPServer(('127.0.0.1',0),Hang)
         thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.01},daemon=True);thread.start()
         try:
-            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',TOKEN,timeout=.1)
+            self.gateway.client=InferenceClient(f'http://127.0.0.1:{server.server_address[1]}',timeout=.1)
             self.gateway.step(MONO);self.finish()
             self.assertTrue(entered.is_set())
             self.assertEqual(self.sent,[]);self.assertEqual(self.gateway.failed,1)
@@ -279,7 +279,7 @@ class GatewayBundleTests(unittest.TestCase):
             self.assertFalse((out/'unused').exists())
             with self.assertRaises(ValueError):build(out)
 
-    def test_gateway_compose_needs_no_devices_and_mounts_token_read_only(self):
+    def test_gateway_compose_needs_no_devices_or_password_file(self):
         import yaml
         value=yaml.safe_load((ROOT/'deploy/gateway/compose.yaml').read_text())['services']['gateway']
         self.assertNotIn('devices',value)
@@ -287,6 +287,8 @@ class GatewayBundleTests(unittest.TestCase):
         self.assertNotIn('ports',value)
         self.assertTrue(value['read_only'])
         self.assertIn('${COSMOS_MODE:-preview}',value['command'])
+        self.assertNotIn('--token-file',value['command'])
+        self.assertFalse(any(m['target']=='/config/inference.token' for m in value['volumes']))
         for mount in value['volumes']:
             self.assertFalse(mount['bind']['create_host_path'])
             if mount['target'].startswith('/config/'):

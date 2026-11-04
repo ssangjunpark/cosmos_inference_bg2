@@ -1,8 +1,7 @@
-"""Small authenticated HTTP protocol, intended for localhost over an SSH tunnel."""
+"""Small HTTP protocol, intended for localhost over an SSH tunnel."""
 from io import BytesIO
 import http.client
 import json
-from pathlib import Path
 import re
 from urllib.parse import urlsplit
 import zipfile
@@ -21,15 +20,6 @@ FIELDS = {'head', 'wrist', 'wrist_left', 'joint_position', 'joint_names', 'sourc
 def identifier(value):
     require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{32}', value), 'Expected a 32-character hexadecimal identifier')
     return value
-
-
-def token_from_file(path):
-    path = Path(path)
-    require(path.is_file() and not path.is_symlink(), 'Inference token file is missing or is a symlink')
-    require(path.stat().st_mode & 0o077 == 0, 'Inference token file must have mode 600 or more restrictive')
-    token = path.read_text().strip()
-    require(24 <= len(token) <= 256 and token.isascii() and not any(c.isspace() for c in token), 'Invalid inference token file')
-    return token
 
 
 def encode_observation(observation):
@@ -55,18 +45,18 @@ def decode_observation(payload):
 
 
 class InferenceClient:
-    def __init__(self, url, token, timeout=10.):
+    def __init__(self, url, timeout=10.):
         parsed = urlsplit(url)
         require(parsed.scheme == 'http' and parsed.hostname in {'127.0.0.1', 'localhost', '::1'} and
                 parsed.username is None and parsed.password is None and not parsed.query and not parsed.fragment and
                 parsed.path in ('', '/'), 'Use a localhost HTTP endpoint through an SSH tunnel')
         require(0 < timeout <= 120, 'Invalid inference timeout')
-        self.host, self.port, self.token, self.timeout = parsed.hostname, parsed.port or 8008, token, timeout
+        self.host, self.port, self.timeout = parsed.hostname, parsed.port or 8008, timeout
 
     def _call(self, method, path, body=None, extra=None):
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
         try:
-            headers = {'Authorization': 'Bearer ' + self.token, **(extra or {})}
+            headers = dict(extra or {})
             if body is not None:
                 headers['Content-Type'] = 'application/x-npz'
             connection.request(method, path, body=body, headers=headers)

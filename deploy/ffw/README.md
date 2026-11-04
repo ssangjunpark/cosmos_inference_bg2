@@ -162,7 +162,7 @@ in the inspection report without resolving its installed limit mismatch.
 The supplied reference profile is not live verified and explicitly disables execution.
 Preview never creates hardware trajectory publishers. Execute additionally requires
 an explicitly enabled verified profile and all runtime readiness/ownership conditions.
-The 5090 network gateway and PRO 6000 authenticated HTTP RPC are implemented and tested
+The 5090 network gateway and PRO 6000 SSH-tunneled HTTP RPC are implemented and tested
 locally. The earlier Unix-socket bridge is a legacy co-located draft; use the three-machine
 runbook. No transfer or live test is part of packaging this folder.
 

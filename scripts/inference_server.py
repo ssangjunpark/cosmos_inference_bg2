@@ -4,7 +4,6 @@ import argparse
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import hmac
 import json
 from pathlib import Path
 import statistics
@@ -14,7 +13,7 @@ import time
 
 from bg2_bridge.core import require
 from bg2_bridge.chunks import SCHEMA
-from bg2_bridge.rpc import MAX_OBSERVATION, decode_observation, identifier, token_from_file
+from bg2_bridge.rpc import MAX_OBSERVATION, decode_observation, identifier
 from bg2_inference import JOINT_NAMES, load_observation
 
 
@@ -63,12 +62,12 @@ class PolicyService:
         self.pool.shutdown(wait=True)
 
 
-def make_server(address, service, token):
+def make_server(address, service):
     class Handler(BaseHTTPRequestHandler):
         timeout = 10
 
         def log_message(self, *_):
-            pass  # Never log Authorization headers or observation payloads.
+            pass  # Do not log observation payloads.
 
         def reply(self, status, data):
             payload = json.dumps(data, allow_nan=False).encode()
@@ -82,22 +81,13 @@ def make_server(address, service, token):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        def authorized(self):
-            supplied = self.headers.get('Authorization', '')
-            if not hmac.compare_digest(supplied.encode(), ('Bearer ' + token).encode()):
-                self.reply(401, {'ok': False, 'error': 'Authentication required'})
-                return False
-            return True
-
         def do_GET(self):
-            if not self.authorized(): return
             if self.path != '/health':
                 self.reply(404, {'ok': False, 'error': 'Unknown endpoint'})
                 return
             self.reply(200, service.health())
 
         def do_POST(self):
-            if not self.authorized(): return
             if self.path != '/predict':
                 self.reply(404, {'ok': False, 'error': 'Unknown endpoint'})
                 return
@@ -135,7 +125,7 @@ def make_server(address, service, token):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['checkpoint', 'tokenizer', 'vae', 'warmup-observation', 'token-file']:
+    for name in ['checkpoint', 'tokenizer', 'vae', 'warmup-observation']:
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--adapter-dir', type=Path, default=Path('/adapter'))
     parser.add_argument('--bind', default='127.0.0.1')
@@ -147,12 +137,11 @@ def main():
     parser.add_argument('--shift', type=float, default=5.)
     parser.add_argument('--guidance-interval', type=float, nargs=2)
     args = parser.parse_args()
-    token = token_from_file(args.token_file)
     from policy_runtime import NativePolicy
     sampling = {k: getattr(args, k) for k in ['seed', 'steps', 'guidance', 'shift', 'guidance_interval']}
     service = PolicyService(lambda: NativePolicy(args.checkpoint, args.tokenizer, args.vae, args.adapter_dir),
                             sampling, load_observation(args.warmup_observation), args.warmup_runs)
-    server = make_server((args.bind, args.port), service, token)
+    server = make_server((args.bind, args.port), service)
     print(json.dumps({'event': 'ready', **service.health()}), flush=True)
     def stop(*_):
         raise KeyboardInterrupt

@@ -30,7 +30,7 @@ settings produced it. Repeat that validation for Nano. Physical robot commands a
 | 3 | **Complete.** CPU reference and native Edge/Nano tokenization/batch checks passed. | Camera preprocessing, prompt formatting, normalization, state conditioning, padding, and masks match training; future ground truth is not supplied as conditioning. |
 | 4 | **Complete.** CPU inverse checks and both generated-output decodes passed. | Correctly select the predicted rows and eight joint channels; apply the verified inverse transform exactly once; save joint names, units, and forecast times with a finite 16-by-8 result. |
 | 5 | **Complete in the official base image.** Both 20k recorded-input runs passed. | Both 20k checkpoints produce real saved predictions for recorded inputs; input/checkpoint identity and sampling parameters are recorded. |
-| 6 | **Complete.** Persistent authenticated HTTP service, one warmed model and GPU thread. | Both real Edge/Nano services passed five local HTTP requests; warm latency is recorded in the three-machine runbook. |
+| 6 | **Complete.** Persistent SSH-tunneled HTTP service, one warmed model and GPU thread. | Both real Edge/Nano services passed five local HTTP requests; warm latency is recorded in the three-machine runbook. |
 | 7 | **Software complete locally; physical commissioning remains.** 5090 gateway and portable FFW companion. | Local raw-observation → HTTP → gateway → FFW executor tests pass. Actual recorded Edge reply passes FFW validation; no remote deployment or actuation. |
 
 The matching source has been found and integrated. Steps 2–5 passed using NVIDIA's official

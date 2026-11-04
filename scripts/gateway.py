@@ -11,7 +11,7 @@ import uuid
 from bg2_bridge.core import require, validate_profile
 from bg2_bridge.gateway import Gateway, GatewayTransport, StatusCache
 from bg2_bridge.observations import Observations
-from bg2_bridge.rpc import InferenceClient, token_from_file
+from bg2_bridge.rpc import InferenceClient
 from bg2_inference import load_observation
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -22,7 +22,6 @@ def main():
     parser.add_argument('mode',choices=('inspect','preview','execute','replay'))
     parser.add_argument('--profile',type=Path,default=ROOT/'profiles/robotis_bg2_rev4.reference.json')
     parser.add_argument('--server-url',default='http://127.0.0.1:8008')
-    parser.add_argument('--token-file',type=Path,default=ROOT/'.runtime/inference.token')
     parser.add_argument('--messages-dir',type=Path,default=ROOT/'deploy/gateway/messages')
     parser.add_argument('--instruction',default='')
     parser.add_argument('--timeout',type=float,default=10.)
@@ -37,7 +36,7 @@ def main():
     validate_profile(profile,live=args.mode in ('preview','execute'),execute=args.mode=='execute')
     client=None
     if args.mode!='inspect':
-        client=InferenceClient(args.server_url,token_from_file(args.token_file),args.timeout)
+        client=InferenceClient(args.server_url,args.timeout)
     if args.mode in ('preview','execute'):require(args.instruction.strip(),'Supply an instruction')
     if args.mode=='replay':require(args.replay_observation is not None,'Supply a recorded observation')
     if args.check:

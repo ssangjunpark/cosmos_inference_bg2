@@ -23,14 +23,8 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${COSMOS_TOKEN_FILE:-./inference.token}
-        target: /config/inference.token
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
         source: ./logs
         target: /output
         bind:
           create_host_path: false
-    command: ["${COSMOS_MODE:-preview}", "--profile", "/config/profile.json", "--messages-dir", "/opt/cosmos_gateway/messages", "--token-file", "/config/inference.token", "--server-url", "http://127.0.0.1:8008", "--instruction", "${COSMOS_INSTRUCTION:-}", "--output", "/output/${COSMOS_RUN_ID:-preview-001}"]
+    command: ["${COSMOS_MODE:-preview}", "--profile", "/config/profile.json", "--messages-dir", "/opt/cosmos_gateway/messages", "--server-url", "http://127.0.0.1:8008", "--instruction", "${COSMOS_INSTRUCTION:-}", "--output", "/output/${COSMOS_RUN_ID:-preview-001}"]

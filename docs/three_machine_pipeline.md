@@ -1,7 +1,8 @@
 # Three-machine Cosmos inference pipeline
 
 Updated 2026-11-04. All software below is implemented and tested locally on PRO 6000.
-Nothing has been copied to, installed on, restarted, or commanded on 3sp5090 or FFW.
+Gateway software is being installed on 3sp5090 at the user's request. FFW remains
+unchanged; no robot services or motion commands have been started by this setup.
 The reference hardware profile deliberately remains non-executable.
 
 Rendered diagram: [PNG](diagrams/three_machine_pipeline.png),
@@ -45,8 +46,8 @@ python3 scripts/cosmos3.py serve \
   --warmup-runs 3 --guidance-interval 960 1001
 ```
 
-The model loads once and warms before listening. The launcher creates
-`.runtime/inference.token` with restrictive permissions without printing it. The API
+The model loads once and warms before listening. There is no API password check or
+credential file. The API
 is exposed only on PRO 6000's `127.0.0.1:8008`; robot networking/devices and SSH keys
 are not mounted in the model container. To use Nano, select its matching tokenizer
 and `--variant nano`, and omit the Edge guidance interval.
@@ -78,18 +79,24 @@ README and `.env.example` describe its settings. Preserve the default preview mo
 
 ## Later deployment and startup order
 
-These commands are instructions for a later authorized deployment, not actions already
-performed. The SSH destination for PRO 6000 is still an operator-supplied value.
+The 5090 software setup is authorized. FFW deployment and robot execution remain future
+work. The existing PRO 6000 → `3sp5090` SSH alias is used to avoid a second SSH setup.
 
-1. Copy the gateway folder to 5090 and the companion folder to FFW. Supply the same
-   camera-verified robot profile to both. Separately copy the server token to 5090 as
-   `inference.token` with mode 600. FFW does not need the token or model assets.
-2. Start the warmed PRO 6000 model service. On 5090, keep this SSH tunnel running:
+1. Copy the gateway folder to 5090 and, only when authorized, the companion folder to
+   FFW. Supply the same camera-verified robot profile to both. Model assets stay on
+   PRO 6000. No API password file is needed.
+2. Start the warmed PRO 6000 model service. In another terminal **on PRO 6000**, keep
+   this reverse SSH tunnel running using the already-working `3sp5090` alias:
 
    ```bash
-   ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-     -L 127.0.0.1:8008:127.0.0.1:8008 <PRO6000-SSH-alias>
+   ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+     -R 127.0.0.1:8008:127.0.0.1:8008 3sp5090
    ```
+
+   The SSH connection is initiated by PRO 6000 to the 5090's existing SSH service
+   (configured port 55031). The gateway still calls `http://127.0.0.1:8008` on the
+   5090; SSH carries that connection back to PRO 6000's local model service. The
+   forwarded listener is bound only to 127.0.0.1. No extra SSH keys need to be copied.
 
 3. On FFW, set FFW_INITIAL_POSITIONS to the actual YAML selected by ROBOTIS bringup,
    then `docker compose up --no-build --pull never` from its generated bundle. It
@@ -98,7 +105,7 @@ performed. The SSH destination for PRO 6000 is still an operator-supplied value.
    preview. Start this companion before the externally managed homing sequence so
    it can witness fresh success for all four homing actions. It never starts homing.
 4. On 5090, create `logs/`, configure `.env` with your UID/GID, instruction, profile,
-   token path, and a new run ID, then `docker compose build` and `docker compose up`
+   and a new run ID, then `docker compose build` and `docker compose up`
    from its bundle. Default is preview. Missing/unknown camera transforms stop startup.
 5. Finish ROBOTIS homing and settling. The companion captures measured left arm,
    left gripper, head, and elevator once. The gateway begins requests when FFW reports
@@ -119,8 +126,8 @@ docker compose run --rm gateway inspect \
 
 Inspect creates no publishers and does not call the model. Its diagnostics report
 raw dimensions and timestamps; an operator still needs to compare orientation and
-field of view with the training preparation. This compose configuration still requires
-the mounted token file to exist even though inspect does not read it.
+field of view with the training preparation. Inspect requires no API password or model
+service and creates no policy publishers.
 
 ## Chunk timing and holds
 
@@ -168,7 +175,7 @@ fit within 0.8 s to avoid holds; measured Nano is too close/slow for that guaran
 CPU integration tests exercise raw synthetic cameras and measured joints through the
 actual HTTP service and gateway into the FFW chunk executor. Other cases cover stale
 inputs/status, timestamp skew, old epochs, starvation, duplicates, velocity/position
-limits, homing, holds, ownership loss, authentication, one model thread, and portable
+limits, homing, holds, ownership loss, password-free localhost RPC, one model thread, and portable
 bundles. The unchanged SDK also passes actual local Zenoh pub/sub with bundled schemas, including
 inside the built Python-only gateway image with a read-only filesystem and network disabled;
 this is a loopback check, not validation against the robot's router.
@@ -206,7 +213,7 @@ last target. The robot's independent stop/watchdog must be checked during commis
   command ownership on FFW's installed 2.2.8 stack. No robot services were active during
   the earlier read-only inspection. Do not use the alternate head target 0.78 until its
   mismatch with the reference 0.6951 upper limit is resolved.
-- The 5090-to-PRO 6000 SSH destination and real network reachability/jitter.
+- Sustained SSH/LAN jitter; the reverse SSH route now uses the known `3sp5090` alias.
 - Live preview acceptance followed by supervised initial motion, tracking, shutdown,
   and starvation checks with the robot's independent stop available.
 

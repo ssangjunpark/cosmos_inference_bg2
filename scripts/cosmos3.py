@@ -190,8 +190,6 @@ def run(args: argparse.Namespace) -> None:
 
 
 def serve(args: argparse.Namespace) -> None:
-    from bg2_bridge.rpc import token_from_file
-    import secrets
     checkpoint = published_checkpoint(args.checkpoint_root, args.variant, args.step)
     tokenizer, vae = args.tokenizer.resolve(strict=True), args.vae.resolve(strict=True)
     observation = args.warmup_observation.resolve(strict=True)
@@ -199,16 +197,6 @@ def serve(args: argparse.Namespace) -> None:
         raise ValueError("Provide the complete local tokenizer and Wan VAE")
     if not observation.is_file() or observation.suffix != ".npz" or not 1 <= args.port <= 65535 or args.warmup_runs < 1:
         raise ValueError("Invalid warm-up observation, port, or warm-up count")
-    if args.token_file.is_symlink():
-        raise ValueError("Inference token file must not be a symlink")
-    token = args.token_file.resolve()
-    if not args.dry_run:
-        if not token.exists():
-            token.relative_to(ROOT)
-            token.parent.mkdir(parents=True, exist_ok=True)
-            with os.fdopen(os.open(token, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as handle:
-                handle.write(secrets.token_urlsafe(32) + "\n")
-        token_from_file(token)
     output = ROOT / "outputs" / ("server-" + args.variant)
     command = container(args.gpu, output, args.dry_run)
     # Serving is the one runtime that accepts network requests. The host port
@@ -218,11 +206,10 @@ def serve(args: argparse.Namespace) -> None:
     command += bind(checkpoint, "/checkpoint") + bind(observation, "/input/warmup.npz")
     mounts, inside = tokenizer_bind(tokenizer)
     command += mounts + bind(vae, "/assets/Wan2.2_VAE.pth") + bind(args.adapter_dir.resolve(strict=True), "/adapter")
-    command += bind(token, "/run/secrets/inference.token")
     command += [BASE_IMAGE if args.image == "base" else POLICY_IMAGE, "/app/inference_server.py",
                 "--bind", "0.0.0.0", "--port", "8008", "--checkpoint", "/checkpoint", "--tokenizer", inside,
                 "--vae", "/assets/Wan2.2_VAE.pth", "--warmup-observation", "/input/warmup.npz",
-                "--token-file", "/run/secrets/inference.token", "--warmup-runs", str(args.warmup_runs),
+                "--warmup-runs", str(args.warmup_runs),
                 "--seed", str(args.seed), "--steps", str(args.steps), "--guidance", str(args.guidance), "--shift", str(args.shift)]
     if args.guidance_interval:
         command += ["--guidance-interval", *map(str, args.guidance_interval)]
@@ -274,7 +261,6 @@ def main() -> int:
     server.add_argument("--vae", type=Path, required=True)
     server.add_argument("--warmup-observation", type=Path, required=True)
     server.add_argument("--warmup-runs", type=int, default=2)
-    server.add_argument("--token-file", type=Path, default=ROOT / ".runtime/inference.token")
     server.add_argument("--adapter-dir", type=Path, default=ROOT / "adapters")
     server.add_argument("--port", type=int, default=8008)
     server.add_argument("--seed", type=int, default=0)
