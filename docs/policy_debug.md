@@ -28,9 +28,12 @@ The service is passive until a gateway request arrives.
 ## 5090
 
 Use the newly packaged gateway image, after building it from the updated bundle.
-The local camera profile must first be completed from verified live dimensions and
-training orientation. Unknown camera settings intentionally block debug startup.
-The default/reference profile remains unverified and cannot start predictions.
+The installed `config/profile.local.json` on 5090 was verified against live frames
+and the supplied training sample on 2026-11-05 KST: head raw size 672×376, rotation
+0°; both wrist raw sizes 424×240, PIL rotation 90° counter-clockwise before cropping.
+Its debug startup check passes, while `execution_enabled` remains false. Unknown
+camera settings still block startup in other profiles; the default/reference profile
+remains unverified.
 
 ```bash
 cd ~/cosmos_bg2_gateway
@@ -76,13 +79,23 @@ absolute/normalized actions, raw conditioned visual latents, sampling settings a
 Each 5090 prediction links this directory in `artifacts`. Outputs and generated bundles
 are ignored by Git. This policy run does not produce imagined future RGB videos.
 
-## Camera orientation evidence still to validate live
+## Verified camera orientation evidence
 
 The original recorder on 5090 is in `~/dev/cyclo_intelligence`.
 Its `shared/shared/robot_configs/ffw_bg2_rev4_config.yaml` specifies wrist rotation 270;
 `cyclo_data/cyclo_data/recorder/transcoder.py::_transpose_filter` maps that value to
 FFmpeg `transpose=2` (counter-clockwise). The rotation is baked into recorded MP4s.
 Thus the corresponding PIL live preprocessing rotation is **90 degrees**, applied
-before the training crop. Head rotation is 0. Confirm raw dimensions and camera
-identity when the robot streams are available before setting the profile's verification
-fields. Do not mark the hardware execution profile verified from this source review.
+before the training crop. Head rotation is 0.
+
+A subscriber-only live capture confirmed the dimensions above and the processed
+three-view layout against `data/example/future_joint/cache/3_0` in the supplied training
+bundle. Capture evidence and exact inputs are on 5090 under
+`logs/camera-check-20261104T151855Z/`, with a copy under the same folder in PRO 6000
+`outputs/`. Selected camera/joint offsets were within 22.28 ms. No policy request or
+command publisher was used. The old profile was saved as
+`config/profile.local.before-camera-verification-20261105.json`.
+The original recorder configuration SHA-256 remains
+`ac30eb71a3910c9a8fe3d6cb1216e498141672038d70ae0b7665d4a4dbcbc74b`.
+Hardware execution status and joint limits were left unchanged; this camera check
+establishes no physical tracking or motor-stop validation.
