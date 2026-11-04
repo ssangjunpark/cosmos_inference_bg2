@@ -38,6 +38,26 @@ We reuse that robot bringup. Our model execution stays on PRO 6000; our 5090 gat
 and FFW companion supply the Cosmos request/trajectory path instead of their LeRobot
 model-loading/UI inference steps. No Cosmos checkpoint needs to be copied to FFW.
 
+## User-selected SNUPI startup file — pending head-target review
+
+The user selected `bg2_vr_startup_snupi.yaml` instead of the standard zero pose.
+It exists at `/home/robotis/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/bg2_vr_startup_snupi.yaml`.
+The installed ROS-package copy matches the host source, SHA-256
+`4dc3affcc1840f61484c5ff0554e2e140e3664158767902145f87ab96925435e`.
+Our FFW template now points to that existing file; the robot's saved launch settings
+and YAML have not been changed.
+
+The SNUPI file uses nonzero arm poses, lift -0.18 and head_joint1 0.78 radians. The
+actual installed model includes the common follower body whose head_joint1 upper
+limit is 0.6951. Offline companion validation rejects it with
+`Homing pose outside limits: head_joint1`. This is a configuration blocker, not missing
+inference implementation. The head target/validated limit must be resolved before
+starting either homing or our companion with this file. No target or limit was altered.
+
+Both the follower's `init_position_file` and the companion's `FFW_INITIAL_POSITIONS`
+must select this same file once validated. The table below records the previously
+observed robot settings, not an applied switch to SNUPI.
+
 ## Planned order
 
 1. Prepare/start our separate FFW companion in **preview**, using the installed
@@ -97,11 +117,10 @@ cd ~/ai_worker/docker
 
 Inside that container, after our companion is running:
 
-```bash
-ros2 launch ffw_bringup ffw_bg2_follower_ai.launch.py \
-  launch_cameras:=true init_position:=true \
-  init_position_file:=ffw_bg2_follower_initial_positions.yaml
-```
+The intended follower launch is `ffw_bg2_follower_ai.launch.py` with cameras and
+initialization enabled, selecting `init_position_file:=bg2_vr_startup_snupi.yaml`.
+The launch is currently blocked by the head-target mismatch above. A complete motion
+startup command should be used only after that configuration is resolved.
 
 This starts real hardware and initialization can move both arms, head and lift.
 A person at the robot must confirm the area is clear and the independent stop is

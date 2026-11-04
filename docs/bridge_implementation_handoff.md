@@ -87,6 +87,15 @@ file hashes were checked. See [FFW startup review](ffw_startup_review_20261104.m
 Start the preview companion before follower initialization. Follower bringup performs
 real homing and has not been started; FFW remains unchanged.
 
+## Selected SNUPI home configuration
+
+The user selected `bg2_vr_startup_snupi.yaml`; the local FFW template and generated
+folder now point to that existing FFW file. Its installed/source copies match. The
+installed head_joint1 upper limit is 0.6951, while this YAML targets 0.78. Actual
+offline home validation rejects it. A user clarification is pending; do not change
+the target/limits by assumption or start homing. The robot YAML and launch settings
+remain untouched. See the startup review for paths and checksum.
+
 ## Remaining physical work
 
 1. Verify raw camera dimensions, orientation and field of view against training preparation.

@@ -48,7 +48,7 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${FFW_INITIAL_POSITIONS:-/home/robotis/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/ffw_bg2_follower_initial_positions.yaml}
+        source: ${FFW_INITIAL_POSITIONS:-/home/robotis/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/bg2_vr_startup_snupi.yaml}
         target: /config/initial_positions.yaml
         read_only: true
         bind:

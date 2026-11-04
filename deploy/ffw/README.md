@@ -153,9 +153,11 @@ The installed ARM64 image has not been run with this companion on FFW yet; live 
 compatibility and controller/camera behavior remain commissioning work.
 
 `.env.example` lists the later deployment settings. Set FFW_INITIAL_POSITIONS to the
-same file selected by ROBOTIS init_position_file; changing that file should require
-no bridge code changes. Do not use the alternate 0.78-radian head target identified
-in the inspection report without resolving its installed limit mismatch.
+same file selected by ROBOTIS init_position_file; changing that file requires no bridge
+code changes. The user selected `bg2_vr_startup_snupi.yaml`, and the template now points
+to it. Startup is pending review: its head_joint1 target 0.78 exceeds the actual installed
+model upper limit 0.6951. The companion rejects that configuration. No target/limit has
+been changed; resolve the mismatch before launching homing.
 
 ## Current validation boundary
 
