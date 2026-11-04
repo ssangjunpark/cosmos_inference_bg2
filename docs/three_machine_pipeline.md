@@ -35,6 +35,10 @@ There are three small processes: model server, gateway, companion. Existing ROBO
 bringup, sensors, controller manager, and motor drivers remain responsible for the robot.
 No second robot driver or IK layer is installed on the 5090.
 
+For the camera/joint-state check without policy commands, use the
+[observation-only commands](observation_only_bringup.md). That pass disables homing
+and does not start our companion.
+
 ## Start the model server on PRO 6000
 
 Use a free GPU explicitly. This example uses the verified official base image and
