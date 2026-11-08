@@ -1,5 +1,7 @@
 """Synchronous full chunks, measured-position pause/resume, and terminal faults."""
 from collections import deque
+import logging
+import math
 import re
 import uuid
 
@@ -20,6 +22,7 @@ class ChunkExecutor:
         self.last_commands, self.last_request_id, self.last_completed_request_id = None, None, None
         self.last_clock, self.start_positions, self.right_hold = None, None, None
         self.seen = deque(maxlen=128)
+        self.tracking_warning_at = {}
 
     def clock(self, robot_ns, monotonic_ns):
         if self.last_clock is not None:
@@ -80,8 +83,17 @@ class ChunkExecutor:
         for name in angular_names(self.startup.profile):
             safety_require(abs(feedback.velocities[name]) <= MAX_ANGULAR_VELOCITY,
                            f"Measured angular velocity exceeds {MAX_ANGULAR_VELOCITY:g} rad/s: {name}")
-            safety_require(abs(feedback.positions[name] - expected[name]) <= MAX_ANGULAR_ERROR + 1e-9,
-                           f"Angular tracking error exceeds 10 degrees: {name}")
+            error = abs(feedback.positions[name] - expected[name])
+            if error > MAX_ANGULAR_ERROR + 1e-9:
+                last_warning = self.tracking_warning_at.get(name)
+                if last_warning is None or now_ns - last_warning >= 1_000_000_000:
+                    logging.getLogger(__name__).warning(
+                        "Angular tracking warning: %s error=%.2f degrees exceeds 10 degrees "
+                        "(measured=%.6f rad, reference=%.6f rad, source_time_ns=%d); continuing",
+                        name, math.degrees(error), feedback.positions[name], expected[name], feedback.source_ns)
+                    self.tracking_warning_at[name] = now_ns
+            else:
+                self.tracking_warning_at.pop(name, None)
 
     def tick(self, feedback, now_ns, *, submit=None, monitor=True):
         if self.startup.phase not in ("ready", "running", "holding", "paused"):

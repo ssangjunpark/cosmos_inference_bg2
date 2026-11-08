@@ -248,15 +248,38 @@ class ChunkTests(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(SafetyStop,'9999 rad/s'):self.engine.monitor(frame,self.source)
 
-    def test_angular_tracking_limit_is_ten_degrees_for_right_and_passive_joints(self):
+    def test_angular_tracking_above_ten_degrees_warns_without_stopping(self):
         for name in ['arm_r_joint1','arm_l_joint1','head_joint1']:
-            for degrees in [9.,10.,10.01]:
+            for degrees in [9.,10.,10.01,-11.,180.]:
                 pose=dict(self.frame.positions);pose[name]+=math.radians(degrees)
                 frame=feedback(self.startup.profile,self.source,pose)
                 with self.subTest(name=name,degrees=degrees):
-                    if degrees<=10: self.engine.monitor(frame,self.source)
+                    self.engine.tracking_warning_at.clear()
+                    if abs(degrees)<=10:
+                        with self.assertNoLogs(level='WARNING'):self.engine.monitor(frame,self.source)
                     else:
-                        with self.assertRaisesRegex(SafetyStop,'10 degrees'): self.engine.monitor(frame,self.source)
+                        with self.assertLogs(level='WARNING') as logs:self.engine.monitor(frame,self.source)
+                        self.assertIn(name,logs.output[0])
+                        self.assertIn(f'error={abs(degrees):.2f} degrees',logs.output[0])
+                        self.assertIn('measured=',logs.output[0]);self.assertIn('reference=',logs.output[0])
+                        self.assertIn('continuing',logs.output[0])
+                    self.assertEqual(self.startup.phase,'ready')
+
+    def test_tracking_warning_is_rate_limited_and_recovers(self):
+        pose=dict(self.frame.positions);pose['arm_r_joint1']+=math.radians(11.)
+        frame=feedback(self.startup.profile,self.source,pose)
+        with self.assertLogs(level='WARNING'):self.engine.monitor(frame,self.source)
+        with self.assertNoLogs(level='WARNING'):
+            self.engine.monitor(frame,self.source)
+            now=self.source+50_000_000
+            self.engine.monitor(feedback(self.startup.profile,now,pose),now)
+        now=self.source+1_000_000_000
+        with self.assertLogs(level='WARNING'):
+            self.engine.monitor(feedback(self.startup.profile,now,pose),now)
+        with self.assertNoLogs(level='WARNING'):
+            self.engine.monitor(feedback(self.startup.profile,now,self.frame.positions),now)
+        with self.assertLogs(level='WARNING'):
+            self.engine.monitor(feedback(self.startup.profile,now,pose),now)
 
     def test_tracking_follows_interpolated_target_not_future_final_target(self):
         data=chunk(self.startup,self.source,step=.05)
@@ -553,14 +576,16 @@ class NodeWiringTests(unittest.TestCase):
         self.assertEqual(node.startup.phase,'fault');self.assertIn('9999 rad/s',node.reason)
         self.assertEqual(node.command_count,before+4)
 
-    def test_runtime_tracking_violation_faults_and_stops(self):
+    def test_runtime_tracking_violation_warns_without_fault_or_stop_commands(self):
         import time
         node=self.make_ready(self.node('execute'));node.controller_ok_at=time.monotonic();node.tick()
         pose=dict(node.feedback.positions);pose['arm_r_joint1']=math.radians(11)
         node.feedback=feedback(profile(),node.robot_ns,pose)
-        before=node.command_count;node.tick()
-        self.assertEqual(node.startup.phase,'fault');self.assertIn('10 degrees',node.reason)
-        self.assertEqual(node.command_count,before+4)
+        before=node.command_count
+        with self.assertLogs(level='WARNING') as logs:node.tick()
+        self.assertNotEqual(node.startup.phase,'fault')
+        self.assertIn('error=11.00 degrees',logs.output[0])
+        self.assertEqual(node.command_count,before)
 
     def test_feedback_loss_faults_without_inventing_a_stop_position(self):
         import time

@@ -30,10 +30,13 @@ matches training. Full details are in `docs/synchronous_execution_20261104.md` i
 
 ## Stop limits
 
-Measured angular velocity above **9999 rad/s** or tracking error above **10 degrees**
-causes a terminal session fault and a best-effort fresh measured-position stop hold.
+Measured angular velocity above **9999 rad/s** causes a terminal session fault and a
+best-effort fresh measured-position stop hold. Tracking error above **10 degrees**
+only prints a warning with the joint, measured/reference positions and error in degrees.
+Tracking warnings do not stop, reject or alter commands; persistent warnings print at
+most once per second per joint and immediately when the threshold is crossed again.
 Command steps are forwarded unchanged; no command-step speed rejection is applied.
-The angle limits apply to angular joints, including the grippers and head, not the linear
+The angular checks apply to angular joints, including the grippers and head, not the linear
 elevator. Finite-value and freshness/controller checks remain. Bridge position-range rejection
 was removed for all joints at the operator's request. Targets are never scaled,
 clipped or silently altered. The former quarter-speed rejection threshold is removed.

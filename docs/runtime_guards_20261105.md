@@ -1,7 +1,10 @@
 # Remaining runtime checks — 2026-11-05 KST
 
 The operator raised the measured angular-velocity threshold to 9999 rad/s, effectively
-disabling this bridge stop for practical motion. The 10-degree tracking stop remains.
+disabling this bridge stop for practical motion. As of November 8, angular tracking
+error above 10 degrees only prints a warning; it does not stop or reject motion.
+Warnings include measured/reference positions and the error in degrees, limited to
+one per second per joint while the error persists, with a new warning on recrossing.
 The same threshold is used by the current-pose angular startup velocity gate; native
 ROBOTIS controller/driver limits are unchanged.
 
@@ -9,7 +12,7 @@ ROBOTIS controller/driver limits are unchanged.
 | --- | --- | --- |
 | Command-step angular velocity | No target-step rejection, scaling or retiming | Operator selected measured velocity only |
 | Measured angular velocity | 9999 rad/s, one feedback sample can fault | Operator requested |
-| Angular tracking error | 10 degrees against interpolated commanded reference | Operator requested |
+| Angular tracking error | Above 10 degrees: warning only against interpolated commanded reference; no stop | Operator requested |
 | Gripper floor | Negative predicted right-gripper targets become zero | Operator requested; no other position clipping |
 | Initial capture | 500 ms continuous fresh, stable measured feedback | Bridge startup assumption |
 | Initial position stability | YAML position_tolerance, currently 0.1 rad for angular joints and 0.1 m for lift | Existing YAML reused by bridge |
