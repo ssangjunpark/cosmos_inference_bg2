@@ -114,7 +114,7 @@ class RunRollouts:
         self.thread.start()
 
     def save(self):
-        atomic_json(self.path,{'schema':ARTIFACT_API,'run_id':self.run_id,'chunks':self.entries,
+        atomic_json(self.path,{'schema':ARTIFACT_API,'run_id':self.run_id,'episode_id':self.run_id,'chunks':self.entries,
             'note':'Forecast chunks in request order; inference/hold gaps are not real-time camera footage.',
             'last_error':self.last_error})
 
@@ -205,7 +205,7 @@ class RunRollouts:
                 for source,target in [('imagined_future.mp4','rollout.mp4'),('imagined_head.mp4','head.mp4'),
                         ('imagined_wrist_left.mp4','wrist_left.mp4'),('imagined_wrist_right.mp4','wrist_right.mp4')]:
                     concatenate([self.directory/e['directory']/source for e in complete],self.directory/target)
-                atomic_json(self.directory/'timeline.json',{'fps':20,'chunks':[
+                atomic_json(self.directory/'timeline.json',{'episode_id':self.run_id,'fps':20,'chunks':[
                     {**e,'first_frame':index*16,'last_frame':index*16+15} for index,e in enumerate(complete)],
                     'frame_count':len(complete)*16,'pending':self.pending(),
                     'missing_chunks':missing,'partial':bool(missing),

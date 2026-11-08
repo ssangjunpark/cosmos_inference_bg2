@@ -4,6 +4,24 @@ Keep using the same 5090 execution command in the [WAM guide](wam_server.md#5090
 The name from `--output` becomes the run ID automatically. No extra car-name variables,
 recording command, model request or FFW update is needed for an ordinary run.
 
+## Episode boundaries and the normal operator workflow
+
+Each launch of the 5090 gateway with a fresh `--output` is a **new episode**, even if its
+prompt is identical to the previous run. The output folder name is its episode ID, and
+`run.json` records that ID, start/end times, prompt and lifecycle state. The PRO recorder,
+chunk manifest and combined-video timeline use the same ID.
+
+Ordinarily, toggle only the gateway command. Leave the PRO model service, SSH tunnel,
+ROBOTIS follower/cameras and FFW companion running between episodes. Ctrl+C ends the
+current episode and requests the FFW pause; the next gateway launch resumes the companion,
+waits for fresh measured state/images, and uses its new CLI prompt. Chunk counters, inputs
+and videos start fresh in the new episode folder. No chunk tail or video is carried over.
+
+Occasional intentional SNUPI rehoming is separate from episode changes. For that case,
+pause the gateway and stop the companion before homing with ROBOTIS; afterward start
+the companion in current-pose mode to capture the new hold. This avoids competing holds
+during homing. Ordinary episode changes do not require these steps.
+
 During inference, PRO 6000 saves the generated RGB frames and returns the actions without
 waiting for MP4s. A recording-only worker downloads each chunk into the matching 5090 run.
 The inference sequence stays **execute all 16 → hold → fresh observations → next request**.

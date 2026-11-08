@@ -1,5 +1,6 @@
 """Per-request inputs/outputs and lossless, timestamped camera-stream recording."""
 from fractions import Fraction
+from datetime import datetime,timezone
 from io import BytesIO
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from .core import require
+from .artifact_protocol import atomic_json
 
 
 class RecordingError(RuntimeError):
@@ -90,10 +92,13 @@ class RunRecorder:
         if artifact_client is not None:
             from .rollouts import RunRollouts
             self.rollouts=RunRollouts(self.root,artifact_client)
-        write_json(self.root/'run.json',{'mode':mode,'physical_publishing':mode=='execute',
+        self.metadata={'episode_id':self.root.name,'episode_state':'running',
+                   'started_at_utc':datetime.now(timezone.utc).isoformat(),'instruction':None,
+                   'mode':mode,'physical_publishing':mode=='execute',
                    'policy_mode':health.get('mode','policy'),'imagined_future_rollout':health.get('mode')=='wam',
                    'camera_recording':'original compressed packets in timestamped Matroska; no frame resampling',
-                   'model_visual_location':'imagined/' if self.rollouts else 'PRO 6000 server output; linked by epoch/request_id'})
+                   'model_visual_location':'imagined/' if self.rollouts else 'PRO 6000 server output; linked by epoch/request_id'}
+        write_json(self.root/'run.json',self.metadata)
 
     def check(self):
         if self.error is not None:raise RecordingError(self.error)
@@ -109,7 +114,11 @@ class RunRecorder:
 
     def inputs(self,request_id,observation,raw_frames):
         self.check()
-        try:save_inputs(self.root/'predictions'/request_id,observation,raw_frames)
+        try:
+            if self.metadata['instruction'] is None:
+                self.metadata['instruction']=str(observation['instruction'])
+                atomic_json(self.root/'run.json',self.metadata)
+            save_inputs(self.root/'predictions'/request_id,observation,raw_frames)
         except Exception as error:
             self.error='Input recording failed: '+str(error);raise RecordingError(self.error) from error
 
@@ -136,6 +145,8 @@ class RunRecorder:
                 except Exception as error:errors.append(str(error))
             write_json(self.root/'recording_summary.json',{'frames':{k:v.count for k,v in self.videos.items()},
                        'error':self.error,'close_errors':errors})
+            self.metadata.update(episode_state='ended',ended_at_utc=datetime.now(timezone.utc).isoformat())
+            atomic_json(self.root/'run.json',self.metadata)
             if self.rollouts is not None:self.rollouts.close(wait=self.recording_wait)
             if errors:raise RecordingError('; '.join(errors))
 

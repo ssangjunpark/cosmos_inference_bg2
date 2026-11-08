@@ -17,6 +17,7 @@ sys.path.insert(0,str(ROOT/'scripts'))
 from bg2_bridge.artifact_protocol import atomic_json
 from bg2_bridge.rpc import InferenceClient
 from bg2_bridge.rollouts import RunRollouts,render_chunk
+from bg2_bridge.recording import RunRecorder
 from inference_server import PolicyService,make_server
 from test_network_inference import FakePolicy,observation
 from test_wam_service import FakeWAM
@@ -42,6 +43,36 @@ def wait_state(client,reference,wanted,seconds=10):
 
 
 class RunRecordingTests(unittest.TestCase):
+    def test_two_gateway_episodes_keep_one_model_and_separate_prompts_inputs_and_videos(self):
+        created=[]
+        def factory():
+            policy=FakeWAM();created.append(policy);return policy
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root)
+            with server(factory,root/'pro') as (service,url):
+                episode_ids=[];request_ids=[]
+                for number,prompt in enumerate(('Pick up the police car.','Pick up the ambulance.'),1):
+                    episode=root/f'execute-episode-{number}';episode.mkdir()
+                    client=InferenceClient(url,5,run_id=episode.name)
+                    recorder=RunRecorder(episode,'execute',health=client.health(),artifact_client=client.recording_client())
+                    obs=observation(number*100);obs['instruction']=prompt;obs['joint_position'][0]=number
+                    epoch,ident=uuid.uuid4().hex,uuid.uuid4().hex
+                    recorder.inputs(ident,obs,{})
+                    recorder.request(epoch,ident,int(obs['source_time_ns']))
+                    recorder.prediction(client.predict(obs,epoch,ident))
+                    recorder.close()
+                    metadata=json.loads((episode/'run.json').read_text())
+                    self.assertEqual(metadata['episode_state'],'ended')
+                    self.assertEqual(metadata['instruction'],prompt)
+                    self.assertIn('started_at_utc',metadata);self.assertIn('ended_at_utc',metadata)
+                    chunks=json.loads((episode/'imagined/manifest.json').read_text())['chunks']
+                    self.assertEqual(len(chunks),1);self.assertEqual(chunks[0]['request_id'],ident)
+                    self.assertEqual(chunks[0]['source_time_ns'],number*100)
+                    self.assertTrue((episode/'imagined/rollout.mp4').exists())
+                    episode_ids.append(metadata['episode_id']);request_ids.append(ident)
+                self.assertEqual(len(set(episode_ids)),2);self.assertEqual(len(set(request_ids)),2)
+                self.assertEqual(len(created),1);self.assertEqual(service.calls,2)
+
     def test_blocked_encoder_does_not_block_first_or_next_prediction(self):
         release=threading.Event();entered=threading.Event()
         with tempfile.TemporaryDirectory() as root:
