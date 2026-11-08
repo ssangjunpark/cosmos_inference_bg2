@@ -91,7 +91,8 @@ def title_lines(text, font, width):
     return lines
 
 
-def load_chunks(run, head, clock_offset):
+def load_chunks(run, head, clock_offset, raw_overrides=None):
+    raw_overrides = raw_overrides or {}
     timeline = read_json(run / 'imagined/timeline.json')
     by_id = {entry['request_id']: entry for entry in timeline['chunks']}
     forwarded = []
@@ -105,7 +106,6 @@ def load_chunks(run, head, clock_offset):
     chunks = []
     for event in forwarded:
         ident = event['request_id']
-        entry = by_id[ident]
         prediction = run / 'predictions' / ident / 'prediction.json'
         reply = prediction.stat().st_mtime_ns - clock_offset + camera_offset
         observed = event['source_time_ns']
@@ -114,7 +114,8 @@ def load_chunks(run, head, clock_offset):
             raise ValueError(f'Cannot reliably reconstruct reply time for {ident}: {extra:.3f}s discrepancy')
         if chunks and reply < chunks[-1]['reply_source_time_ns'] + 800_000_000:
             raise ValueError('Overlapping forwarded chunks in a synchronous recording')
-        path = run / 'imagined' / entry['directory'] / 'decoded_rollout.npy'
+        path = (Path(raw_overrides[ident]) if ident in raw_overrides else
+                run / 'imagined' / by_id[ident]['directory'] / 'decoded_rollout.npy')
         if not path.is_file():
             raise ValueError('Missing raw imagined frames: ' + str(path))
         chunks.append({'request_id': ident, 'observation_source_time_ns': observed,
@@ -156,7 +157,8 @@ def render(job, runs, output, profile, font_path):
         with ExitStack() as stack:
             cameras = {key: Camera(run, key, profile['cameras'][key], stack)
                        for key in ('head', 'wrist_left', 'wrist')}
-            chunks, generated = load_chunks(run, cameras['head'], clock_offset)
+            chunks, generated = load_chunks(run, cameras['head'], clock_offset,
+                                            job.get('raw_frame_overrides'))
             replies = [entry['reply_source_time_ns'] for entry in chunks]
             origin = min(camera.times[0] for camera in cameras.values())
             end = max(camera.times[-1] + int(statistics.median(
@@ -231,6 +233,7 @@ def render(job, runs, output, profile, font_path):
                   'camera_layout': 'head above left wrist (left) and right wrist (right); training crop/rotation',
                   'planning_overlay': 'Planning...', 'planning_frames': planning_frames,
                   'forwarded_chunks': len(chunks), 'recorded_imagined_chunks': generated,
+                  'recovered_raw_chunk_overrides': job.get('raw_frame_overrides', {}),
                   'timing_method': 'Prediction JSON save time mapped from 5090 wall time through monotonic camera receipt/source timestamps. '
                                    'Approximate response availability, not an exact FFW acceptance timestamp. '
                                    'Each forwarded forecast plays for 0.8 s; final frame holds while Planning. '
