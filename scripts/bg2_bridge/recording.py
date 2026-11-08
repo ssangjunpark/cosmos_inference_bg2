@@ -78,17 +78,22 @@ class CameraVideo:
 
 
 class RunRecorder:
-    def __init__(self,root,mode):
+    def __init__(self,root,mode,*,health=None,artifact_client=None,recording_wait=30):
         self.root,self.mode=Path(root),mode
         (self.root/'cameras').mkdir(exist_ok=False)
         (self.root/'predictions').mkdir(exist_ok=False)
         self.videos={key:CameraVideo(self.root/'cameras',key) for key in ['head','wrist_left','wrist']}
         self.error,self.closed=None,False
         self.lock=RLock()
+        self.rollouts=None;self.recording_wait=recording_wait
+        health=health or {}
+        if artifact_client is not None:
+            from .rollouts import RunRollouts
+            self.rollouts=RunRollouts(self.root,artifact_client)
         write_json(self.root/'run.json',{'mode':mode,'physical_publishing':mode=='execute',
-                   'policy_mode':'policy','imagined_future_rollout':False,
+                   'policy_mode':health.get('mode','policy'),'imagined_future_rollout':health.get('mode')=='wam',
                    'camera_recording':'original compressed packets in timestamped Matroska; no frame resampling',
-                   'model_visual_location':'PRO 6000 server output; linked by epoch/request_id'})
+                   'model_visual_location':'imagined/' if self.rollouts else 'PRO 6000 server output; linked by epoch/request_id'})
 
     def check(self):
         if self.error is not None:raise RecordingError(self.error)
@@ -113,6 +118,13 @@ class RunRecorder:
         try:write_json(self.root/'predictions'/result['request_id']/'prediction.json',result)
         except Exception as error:
             self.error='Prediction recording failed: '+str(error);raise RecordingError(self.error) from error
+        if self.rollouts is not None:self.rollouts.prediction(result)
+
+    def request(self,epoch,request_id,source_time_ns):
+        if self.rollouts is not None:self.rollouts.register(epoch,request_id,source_time_ns)
+
+    def cancel_collection(self):
+        if self.rollouts is not None:self.rollouts.cancel()
 
     def close(self):
         with self.lock:
@@ -124,6 +136,7 @@ class RunRecorder:
                 except Exception as error:errors.append(str(error))
             write_json(self.root/'recording_summary.json',{'frames':{k:v.count for k,v in self.videos.items()},
                        'error':self.error,'close_errors':errors})
+            if self.rollouts is not None:self.rollouts.close(wait=self.recording_wait)
             if errors:raise RecordingError('; '.join(errors))
 
 

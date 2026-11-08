@@ -133,7 +133,7 @@ def write_mp4(path, frames, fps=20):
     subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
         "-filter_threads", "1", "-filter_complex_threads", "1",
         "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", f"{frames.shape[2]}x{frames.shape[1]}",
-        "-framerate", str(fps), "-i", "pipe:0", "-an", "-c:v", "libx264", "-threads", "2",
+        "-threads", "1", "-framerate", str(fps), "-i", "pipe:0", "-an", "-c:v", "libx264", "-threads", "1",
         "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)],
         input=frames.tobytes(), check=True, env=media_env)
     result = subprocess.check_output(["ffprobe", "-v", "error", "-threads", "1", "-select_streams", "v:0", "-count_frames",

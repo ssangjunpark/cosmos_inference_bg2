@@ -17,6 +17,12 @@ services:
       - /tmp:rw,nosuid,nodev,size=64m
     volumes:
       - type: bind
+        source: ./scripts
+        target: /opt/cosmos_gateway/scripts
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ${COSMOS_PROFILE:-./config/profile.reference.json}
         target: /config/profile.json
         read_only: true

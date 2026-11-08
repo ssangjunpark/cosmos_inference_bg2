@@ -10,7 +10,6 @@ import statistics
 import signal
 import threading
 import time
-import uuid
 
 import numpy as np
 
@@ -19,6 +18,7 @@ from bg2_bridge.chunks import SCHEMA
 from bg2_bridge.rpc import MAX_OBSERVATION, decode_observation, identifier
 from bg2_inference import JOINT_NAMES, load_observation
 from bg2_bridge.recording import save_model_result
+from bg2_bridge.artifact_protocol import ARTIFACT_API, run_name
 
 
 class PolicyService:
@@ -30,6 +30,7 @@ class PolicyService:
         self.durations = deque(maxlen=50)
         self.calls = 0
         self.mode = 'policy'
+        self.recordings = None
         self.output_dir=Path(output_dir) if output_dir is not None else None
         if self.output_dir is not None:self.output_dir.mkdir(parents=True,exist_ok=True)
         try:
@@ -41,12 +42,11 @@ class PolicyService:
             for _ in range(warmup_runs):
                 start = time.monotonic()
                 result = self.pool.submit(self.policy.predict, warmup, **self.sampling).result()
-                if self.mode == 'wam' and self.output_dir is not None:
-                    response = self.response(warmup, result, uuid.uuid4().hex, uuid.uuid4().hex,
-                                             time.monotonic() - start)
-                    save_model_result(self.output_dir, warmup, result, response, self.sampling, request_group='warmup')
                 self.warmup_seconds.append(time.monotonic() - start)
             self.durations.extend(self.warmup_seconds[1:] or self.warmup_seconds)
+            if self.mode == 'wam' and self.output_dir is not None:
+                from model_recording import ModelRecordings
+                self.recordings = ModelRecordings(self.output_dir)
         except Exception:
             self.pool.shutdown(wait=True)
             raise
@@ -58,15 +58,24 @@ class PolicyService:
                 'warmup_seconds': self.warmup_seconds, 'latency_budget_ns': int(max(values) * 1e9),
                 'median_prediction_seconds': statistics.median(values), 'prediction_calls': self.calls,
                 'sampling': self.sampling, 'mode': self.mode, 'records_outputs': self.output_dir is not None,
-                'imagined_future_rollout': self.mode == 'wam', 'video_frames': 17 if self.mode == 'wam' else 1}
+                'imagined_future_rollout': self.mode == 'wam', 'video_frames': 17 if self.mode == 'wam' else 1,
+                'artifacts_api': ARTIFACT_API if self.recordings is not None else None,
+                'recording_error': self.recordings.last_error if self.recordings is not None else None}
 
-    def predict(self, observation, epoch, request_id):
+    def predict(self, observation, epoch, request_id, run_id=None):
         start = time.monotonic()
         result = self.pool.submit(self.policy.predict, observation, **self.sampling).result()
         elapsed = time.monotonic() - start
         response = self.response(observation, result, epoch, request_id, elapsed)
         if self.output_dir is not None:
-            response['artifacts']=save_model_result(self.output_dir,observation,result,response,self.sampling)
+            if self.recordings is not None:
+                try:
+                    response['artifacts'] = self.recordings.submit(observation,result,response,self.sampling,run_id or epoch)
+                except Exception as error:
+                    self.recordings.last_error = str(error)
+                    response['artifacts'] = {'state':'failed','error':str(error)}
+            else:
+                response['artifacts']=save_model_result(self.output_dir,observation,result,response,self.sampling)
         self.durations.append(time.monotonic() - start)
         self.calls += 1
         return response
@@ -85,6 +94,7 @@ class PolicyService:
 
     def close(self):
         self.pool.shutdown(wait=True)
+        if self.recordings is not None:self.recordings.close()
 
 
 def make_server(address, service):
@@ -96,17 +106,45 @@ def make_server(address, service):
 
         def reply(self, status, data):
             payload = json.dumps(data, allow_nan=False).encode()
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(payload)))
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
             try:
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
                 self.wfile.write(payload)
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
         def do_GET(self):
+            if self.path.startswith('/artifact-lookup/') and service.recordings is not None:
+                try:
+                    parts=self.path.split('/')[2:]
+                    if len(parts)!=2:raise ValueError('Invalid recording lookup')
+                    self.reply(200,service.recordings.find(*parts))
+                except (ValueError,FileNotFoundError):
+                    self.reply(404,{'ok':False,'error':'Saved request not found'})
+                return
+            if self.path.startswith('/artifacts/') and service.recordings is not None:
+                try:
+                    parts = self.path.split('/')[2:]
+                    if len(parts) == 3:
+                        self.reply(200, service.recordings.status(*parts))
+                    elif len(parts) == 4:
+                        path = service.recordings.file(*parts)
+                        self.send_response(200)
+                        self.send_header('Content-Type','application/octet-stream')
+                        self.send_header('Content-Length',str(path.stat().st_size))
+                        self.end_headers()
+                        with path.open('rb') as stream:
+                            while block := stream.read(64*1024):self.wfile.write(block)
+                    else:
+                        raise ValueError('Unknown recording endpoint')
+                except (FileNotFoundError, ValueError):
+                    self.reply(404,{'ok':False,'error':'Recording not available'})
+                except (BrokenPipeError,ConnectionResetError):
+                    pass
+                return
             if self.path != '/health':
                 self.reply(404, {'ok': False, 'error': 'Unknown endpoint'})
                 return
@@ -126,6 +164,8 @@ def make_server(address, service):
                 require(0 < size <= MAX_OBSERVATION, 'Invalid observation body length')
                 epoch = identifier(self.headers.get('X-Session-Epoch'))
                 request_id = identifier(self.headers.get('X-Request-ID'))
+                run_id = self.headers.get('X-Run-ID')
+                if run_id is not None:run_name(run_id)
                 payload = self.rfile.read(size)
                 require(len(payload) == size, 'Incomplete observation body')
                 observation = decode_observation(payload)
@@ -134,7 +174,7 @@ def make_server(address, service):
                 self.reply(400, {'ok': False, 'error': str(error)})
                 return
             try:
-                result = service.predict(observation, epoch, request_id)
+                result = service.predict(observation, epoch, request_id, run_id)
                 self.reply(200, result)
             except Exception as error:
                 self.reply(500, {'ok': False, 'error': str(error)})

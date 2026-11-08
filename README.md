@@ -9,7 +9,9 @@ For the new WAM checkpoints, use the [offline WAM guide](docs/wam_inference.md).
 It generates joint predictions and imagined videos on PRO 6000 from a recorded observation,
 with networking disabled and checkpoints mounted read-only.
 The [persistent WAM server guide](docs/wam_server.md) connects the same WAM runtime to the
-existing gateway API and records imagined MP4s on PRO 6000 for each request.
+existing gateway API and records timestamped imagined chunks without delaying action replies.
+The updated [per-run recording guide](docs/run_recordings.md) describes timestamped chunk
+downloads to 5090 and per-chunk/combined MP4 construction after the run stops.
 
 The current control contract is **hold → fresh observation → infer → execute all 16 points
 → hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).

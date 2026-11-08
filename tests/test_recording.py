@@ -158,7 +158,7 @@ class DebugTests(unittest.TestCase):
             def connect(*args,**kwargs):
                 self.assertTrue(kwargs['inspect']);return transport
             class Client:
-                def __init__(self,*args):pass
+                def __init__(self,*args,**kwargs):pass
                 def health(self):return {'records_outputs':True}
                 def predict(self,observed,epoch,ident):
                     return {'epoch':epoch,'request_id':ident,'positions':[[0.]*8]*16}

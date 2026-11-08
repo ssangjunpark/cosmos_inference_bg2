@@ -41,7 +41,7 @@ def finish_control(transport,status,command):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=('inspect','preview','execute','replay'))
+    parser.add_argument('mode',choices=('inspect','preview','execute','replay','collect-recordings'))
     parser.add_argument('--profile',type=Path,default=ROOT/'profiles/robotis_bg2_rev4.reference.json')
     parser.add_argument('--server-url',default='http://127.0.0.1:8008')
     parser.add_argument('--messages-dir',type=Path,default=ROOT/'deploy/gateway/messages')
@@ -54,15 +54,26 @@ def main(argv=None):
     parser.add_argument('--debug',action='store_true',help='Live predictions and recordings only; no FFW command publishers or homing requirement')
     parser.add_argument('--max-predictions',type=int,default=0,help='Debug only: stop after this many predictions; zero runs until Ctrl+C')
     parser.add_argument('--check',action='store_true')
+    parser.add_argument('--recording-wait',type=float,default=30.,help='Seconds to collect pending imagined clips after control stops; Ctrl+C again skips this wait')
     args=parser.parse_args(argv)
     require(args.duration>=0 and args.requests>0 and args.max_predictions>=0,'Invalid duration or count')
+    require(args.recording_wait>=0,'Invalid recording wait')
     require(not args.debug or args.mode in ('preview','execute'),'Use --debug with preview or execute')
     require(args.debug or args.max_predictions==0,'--max-predictions is for --debug only')
+    if args.mode=='collect-recordings':
+        from bg2_bridge.rollouts import RunRollouts
+        require((args.output/'imagined/manifest.json').is_file() or (args.output/'predictions').is_dir(),
+                'No prediction records or imagined manifest in this run')
+        collector=RunRollouts(args.output,InferenceClient(args.server_url,5),resume=True)
+        signal.signal(signal.SIGINT,lambda *_:collector.cancel())
+        signal.signal(signal.SIGTERM,lambda *_:collector.cancel())
+        collector.close(wait=args.recording_wait)
+        return
     profile=json.loads(args.profile.read_text())
     validate_profile(profile,live=args.mode in ('preview','execute'),execute=args.mode=='execute' and not args.debug)
     client=None
     if args.mode!='inspect':
-        client=InferenceClient(args.server_url,args.timeout)
+        client=InferenceClient(args.server_url,args.timeout,run_id=args.output.name)
     if args.mode in ('preview','execute'):require(args.instruction.strip(),'Supply an instruction')
     if args.mode=='replay':require(args.replay_observation is not None,'Supply a recorded observation')
     if args.check:
@@ -70,12 +81,20 @@ def main(argv=None):
     args.output.mkdir(parents=True,exist_ok=False)
     health=client.health() if client is not None else None
     if args.mode=='replay':
+        from bg2_bridge.artifact_protocol import ARTIFACT_API
+        from bg2_bridge.rollouts import RunRollouts
+        collector=RunRollouts(args.output,client.recording_client()) if health.get('artifacts_api')==ARTIFACT_API else None
         observation=load_observation(args.replay_observation)
         elapsed=[];last=None
-        for _ in range(args.requests):
-            start=time.monotonic()
-            last=client.predict(observation,uuid.uuid4().hex,uuid.uuid4().hex)
-            elapsed.append(time.monotonic()-start)
+        try:
+            for _ in range(args.requests):
+                start=time.monotonic();epoch,request_id=uuid.uuid4().hex,uuid.uuid4().hex
+                if collector is not None:collector.register(epoch,request_id,int(observation['source_time_ns']))
+                last=client.predict(observation,epoch,request_id)
+                if collector is not None:collector.prediction(last)
+                elapsed.append(time.monotonic()-start)
+        finally:
+            if collector is not None:collector.close(wait=args.recording_wait)
         (args.output/'last_prediction.json').write_text(json.dumps(last,indent=2)+'\n')
         report={'mode':'recorded_replay','physical_publishing':False,'requests':args.requests,'health':health,
                 'roundtrip_seconds':elapsed,'median_seconds':statistics.median(elapsed),'max_seconds':max(elapsed),
@@ -83,13 +102,17 @@ def main(argv=None):
         (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(report,indent=2));return
     if client is not None:require(health.get('records_outputs') is True,'Restart the PRO model service with output recording enabled')
-    recorder=RunRecorder(args.output,'debug' if args.debug else args.mode) if client is not None else None
+    from bg2_bridge.artifact_protocol import ARTIFACT_API
+    recorder=RunRecorder(args.output,'debug' if args.debug else args.mode,health=health,
+        artifact_client=client.recording_client() if health.get('artifacts_api')==ARTIFACT_API else None,
+        recording_wait=args.recording_wait) if client is not None else None
     observations,status=Observations(profile),StatusCache()
     transport=None
     engine=None
     stopped=False
     def stop(*_):
         nonlocal stopped
+        if stopped and recorder is not None:recorder.cancel_collection()
         stopped=True
         if engine is not None: engine.close()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)

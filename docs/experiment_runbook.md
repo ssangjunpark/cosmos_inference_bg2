@@ -6,6 +6,8 @@ Docker build, image download, or package installation.
 
 For WAM, start the model using the [WAM server guide](wam_server.md), then continue at
 step 2 here. The gateway commands below include WAM's `--timeout 120` option.
+The [per-run recording guide](run_recordings.md) covers automatic chunk downloads to 5090,
+individual and combined imagined MP4s after Ctrl+C, and recovery of earlier runs.
 
 ## Machines and terminals
 

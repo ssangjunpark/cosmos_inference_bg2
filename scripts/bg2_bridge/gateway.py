@@ -107,6 +107,8 @@ class Gateway:
         started = time.monotonic_ns()
         try:
             if self.recorder is not None:self.recorder.inputs(request_id,observation,raw_frames)
+            if self.recorder is not None and hasattr(self.recorder,'request'):
+                self.recorder.request(epoch,request_id,source)
             # Blocking inference: FFW is holding, and no next request is prefetched.
             result = self.client.predict(observation, epoch, request_id)
             if self.recorder is not None:self.recorder.prediction(result)
@@ -132,6 +134,8 @@ class Gateway:
 
     def close(self):
         self.closed = True
+        cancel=getattr(self.client,'cancel',None)
+        if cancel is not None:cancel()
 
 
 class GatewayTransport:
@@ -232,7 +236,10 @@ class DebugGateway:
         self.epoch=uuid.uuid4().hex
         self.closed,self.last_source_ns,self.requests,self.predictions=False,0,0,0
 
-    def close(self):self.closed=True
+    def close(self):
+        self.closed=True
+        cancel=getattr(self.client,'cancel',None)
+        if cancel is not None:cancel()
 
     def step(self,now_ns=None):
         if self.closed:return None
@@ -247,7 +254,11 @@ class DebugGateway:
         except (ValueError,OSError) as error:return {'event':'waiting','reason':str(error)}
         request_id=uuid.uuid4().hex;self.last_source_ns=int(observation['source_time_ns'])
         self.recorder.inputs(request_id,observation,raw);self.requests+=1
-        result=self.client.predict(observation,self.epoch,request_id)
+        if hasattr(self.recorder,'request'):self.recorder.request(self.epoch,request_id,self.last_source_ns)
+        try:result=self.client.predict(observation,self.epoch,request_id)
+        except Exception:
+            if self.closed:return {'event':'interrupted'}
+            raise
         self.recorder.prediction(result);self.predictions+=1
         return {'event':'prediction_saved','request_id':request_id,'epoch':self.epoch,
                 'source_time_ns':self.last_source_ns,'physical_publishing':False,'artifacts':result.get('artifacts')}

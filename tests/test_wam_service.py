@@ -76,7 +76,7 @@ class WAMServiceTests(unittest.TestCase):
                 self.assertEqual(client.health()['mode'], 'wam')
                 self.assertTrue(client.health()['imagined_future_rollout'])
                 warmups=list((Path(directory)/'warmup').glob('*/*/imagined_future.mp4'))
-                self.assertEqual(len(warmups),1)
+                self.assertEqual(len(warmups),0)  # Startup no longer waits for video files.
                 from bg2_bridge.chunks import ChunkExecutor, EXECUTION_CONTRACT
                 from test_ffw_companion import ready, feedback
                 startup, measured = ready()
@@ -92,13 +92,18 @@ class WAMServiceTests(unittest.TestCase):
                 np.testing.assert_array_equal(targets[:, 7], np.zeros(16))
                 self.assertTrue((service.policy.raw_positions[:, 7] < 0).all())
                 folder = Path(directory) / result['artifacts']['directory']
+                import time
+                deadline=time.monotonic()+30
+                while client.recording_status(result['artifacts']['status_path'])['state'] not in ('complete','failed'):
+                    self.assertLess(time.monotonic(),deadline)
+                    time.sleep(.02)
                 self.assertTrue((np.load(folder / 'raw_joint_positions.npy')[:, 7] < 0).all())
                 np.testing.assert_array_equal(np.load(folder / 'joint_positions.npy'), targets)
                 metadata = json.loads((folder / 'model_output.json').read_text())
                 self.assertEqual(metadata['mode'], 'wam')
                 self.assertTrue(metadata['imagined_future_rollout'])
-                for name in result['artifacts']['videos'].values():
-                    self.assertTrue((folder / name).is_file())
+                self.assertFalse(list(folder.glob('*.mp4')))  # Rendering belongs to the completed 5090 run.
+                self.assertEqual(json.loads((folder/'rollout.json').read_text())['source_time_ns'],int(obs['source_time_ns']))
                 self.assertEqual(np.load(folder / 'decoded_rollout.npy').shape, (17, 640, 512, 3))
                 # Same extras and 16 points pass the actual companion's pure executor.
                 now = measured.source_ns + 20_000_000
@@ -115,7 +120,7 @@ class WAMServiceTests(unittest.TestCase):
             finally:
                 server.shutdown(); server.server_close(); thread.join(2); service.close()
 
-    def test_failed_video_save_does_not_return_an_executable_chunk_and_releases_gate(self):
+    def test_failed_video_save_reports_recording_error_without_stopping_actions(self):
         with tempfile.TemporaryDirectory() as directory:
             service = PolicyService(FakeWAM, {}, observation(), 1, directory)
             server = make_server(('127.0.0.1', 0), service)
@@ -123,11 +128,18 @@ class WAMServiceTests(unittest.TestCase):
             thread.start()
             try:
                 client = InferenceClient(f'http://127.0.0.1:{server.server_address[1]}', timeout=30)
-                with mock.patch('bg2_wam.save_rollout', side_effect=RuntimeError('encoding failed')):
-                    with self.assertRaisesRegex(ValueError, 'encoding failed'):
-                        client.predict(observation(), uuid.uuid4().hex, uuid.uuid4().hex)
+                service.recordings.renderer=mock.Mock(side_effect=RuntimeError('recording manifest failed'))
+                with mock.patch('bg2_wam.save_rollout', side_effect=AssertionError('Server must not encode videos')):
+                    result=client.predict(observation(), uuid.uuid4().hex, uuid.uuid4().hex)
+                    import time
+                    deadline=time.monotonic()+5
+                    while True:
+                        state=client.recording_status(result['artifacts']['status_path'])
+                        if state['state']=='failed':break
+                        self.assertLess(time.monotonic(),deadline);time.sleep(.01)
+                    self.assertIn('recording manifest failed',state['error'])
                 self.assertTrue(service.gate.acquire(blocking=False)); service.gate.release()
-                self.assertEqual(client.health()['prediction_calls'], 0)
+                self.assertEqual(client.health()['prediction_calls'], 1)
             finally:
                 server.shutdown(); server.server_close(); thread.join(2); service.close()
 
