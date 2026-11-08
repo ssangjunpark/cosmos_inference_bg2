@@ -426,12 +426,19 @@ docker exec lerobot_server /command/s6-svc -d /run/service/main-runtime
 - `cameras/*.timestamps.jsonl`: original source and receipt timestamps.
 - `predictions/<request_id>/`: raw/input images, observation NPZ/JSON and predicted 16×8 targets.
 - `events.jsonl`, `run.json`, `recording_summary.json`: run details and recording results.
+- For WAM, `imagined/chunks/` contains timestamped raw forecasts; per-chunk MP4s and the
+  combined `imagined/rollout.mp4` plus camera-view MP4s are constructed after control stops.
+  See [run recordings](run_recordings.md) for collection/resume and frame-time semantics.
 
 MKV files are videos. MP4 copies and tiled comparison videos are separate exports;
 they are not generated automatically by every gateway run. Keep original recordings.
 Rename a run folder only after the gateway has stopped and finalized it.
 
-**PRO 6000:** `~/Documents/cosmos_inference_bg2/outputs/server-nano/requests/` or
+**PRO 6000, WAM:** raw snapshots and provenance remain under
+`outputs/server-wam-<tier>/runs/<run-name>/requests/<epoch>/<request_id>/`.
+The recording worker prepares timestamps/checksums, with no MP4 encoding in the action reply.
+
+**PRO 6000, original policy:** `~/Documents/cosmos_inference_bg2/outputs/server-nano/requests/` or
 `outputs/server-edge/requests/`, organized by epoch and request ID. These contain model
 inputs, predictions, normalized actions and conditioned visual latents. Policy mode does
 not generate an imagined future RGB rollout. Generated outputs are ignored by Git.

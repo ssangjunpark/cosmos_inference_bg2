@@ -148,7 +148,7 @@ received both raw chunks, created their individual MP4s, and assembled four comb
 Each combined video was independently decoded: 32 frames, 20 fps, with expected dimensions.
 The temporary test server was stopped afterward.
 
-The full CPU suite passed 152 tests (one optional SDK test skipped). Coverage includes a
+The full CPU suite passed 153 tests (one optional SDK test skipped). Coverage includes a
 blocked recording worker with continued action delivery, immediate cancellation of a 120 s
 HTTP wait, save failure isolation, checksum-verified downloads, request ordering, restartable
 collection, legacy timed-out request recovery and the existing synchronous companion logic.
