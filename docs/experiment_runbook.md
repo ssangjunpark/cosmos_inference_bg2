@@ -1,8 +1,11 @@
 # Experiment runbook: PRO 6000 → 5090 → FFW
 
-Updated 2026-11-05 KST. Use this as the main operator guide for the installed setup.
+Updated 2026-11-08 KST. Use this as the main operator guide for the installed setup.
 All commands below are for you to run manually. Ordinary experiments need no SCP,
 Docker build, image download, or package installation.
+
+For WAM, start the model using the [WAM server guide](wam_server.md), then continue at
+step 2 here. The gateway commands below include WAM's `--timeout 120` option.
 
 ## Machines and terminals
 
@@ -221,24 +224,21 @@ is supplied here, on 5090, for every run. The server on PRO 6000 selects Edge ve
 ```bash
 cd ~/cosmos_bg2_gateway
 curl --fail http://127.0.0.1:18008/health
-CAR_NAME=police
-TASK_INSTRUCTION="Pick up the police car and place it on the top-right picture"
-RUN_ID="execute-$(date -u +%Y%m%dT%H%M%SZ)_${CAR_NAME}"
 COSMOS_PROFILE=./config/profile.execute.json \
   docker compose run --rm --no-deps --name cosmos-bg2-execute gateway \
   execute \
   --profile /config/profile.json \
   --messages-dir /opt/cosmos_gateway/messages \
   --server-url http://127.0.0.1:18008 \
-  --instruction "$TASK_INSTRUCTION" \
-  --output "/output/$RUN_ID"
+  --timeout 120 \
+  --instruction "Pick up the police car and place it on the top-right picture" \
+  --output "/output/execute-$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-Change `CAR_NAME` for the recording folder suffix and `TASK_INSTRUCTION` for the actual
-policy prompt. The folder name alone does not change the prompt. Generate a new `RUN_ID`
-each time; an existing output directory is never overwritten. With this example,
-files appear under `~/cosmos_bg2_gateway/logs/execute-..._police/` on 5090. Run-name
-timestamps use UTC (`date -u`).
+Edit `--instruction` directly to change the policy prompt. Each invocation generates a
+fresh UTC timestamp (`date -u`); an existing output directory is never overwritten.
+Files appear under `~/cosmos_bg2_gateway/logs/execute-.../` on 5090. You can append a car
+label to `--output` if wanted; the folder name alone does not change the prompt.
 
 Normal execution is synchronous: **hold → fresh measured state and three camera inputs
 → prediction → all 16 targets over 0.8 seconds → hold the last command → next request**.
@@ -260,6 +260,7 @@ COSMOS_PROFILE=./config/profile.local.json \
   --profile /config/profile.json \
   --messages-dir /opt/cosmos_gateway/messages \
   --server-url http://127.0.0.1:18008 \
+  --timeout 120 \
   --instruction "$TASK_INSTRUCTION" \
   --output "/output/$RUN_ID"
 ```

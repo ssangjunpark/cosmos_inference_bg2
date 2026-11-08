@@ -89,6 +89,31 @@ gateway source change or FFW bundle update required. It changes how long the cli
 not the 20 Hz execution timing. Encoding uses bounded CPU threads, but export latency can
 still vary on a shared machine.
 
+## 5090: run normal inference
+
+Run this on **5090**, after the WAM server and tunnel are healthy and the FFW follower
+and execution companion are ready. Follow the [experiment runbook](experiment_runbook.md)
+for FFW startup and SNUPI initialization. This command enables robot movement.
+
+```bash
+cd ~/cosmos_bg2_gateway
+
+COSMOS_PROFILE=./config/profile.execute.json \
+  docker compose run --rm --no-deps --name cosmos-bg2-execute gateway \
+  execute \
+  --profile /config/profile.json \
+  --messages-dir /opt/cosmos_gateway/messages \
+  --server-url http://127.0.0.1:18008 \
+  --timeout 120 \
+  --instruction "Pick up the police car and place it on the top-right picture" \
+  --output "/output/execute-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+This is the original execution command with `--timeout 120` added for WAM. Edit the
+instruction directly; no `CAR_NAME`, `TASK_INSTRUCTION` or `RUN_ID` assignments are needed.
+Each run creates a timestamped output directory. Ctrl+C requests a pause; wait for
+`pause_confirmed` before assuming the robot paused.
+
 ## Saved files
 
 Each successful request writes:
