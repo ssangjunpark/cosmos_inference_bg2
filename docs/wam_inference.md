@@ -4,6 +4,8 @@ This command generates one complete action chunk and its imagined video from a r
 current observation. Everything runs on PRO 6000. It opens no server or tunnel and has no
 connection to 5090 or FFW. The existing hardware pipeline is unchanged.
 
+For the persistent server used by the gateway, see [WAM server setup](wam_server.md).
+
 The sequence is synchronous: load current observation → jointly generate actions/video →
 decode video → save results → exit. There is no RTC, prefetch, background inference or robot
 execution. If connected to hardware in future, the agreed sequence remains: execute all

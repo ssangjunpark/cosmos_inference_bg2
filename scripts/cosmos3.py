@@ -190,29 +190,47 @@ def run(args: argparse.Namespace) -> None:
 
 
 def serve(args: argparse.Namespace) -> None:
-    checkpoint = published_checkpoint(args.checkpoint_root, args.variant, args.step)
+    mode = getattr(args, 'mode', 'policy')
+    if mode == 'wam':
+        from wam_checkpoint import DEFAULT_ROOT, published_wam_checkpoint, validate_checkpoint, validate_experiment
+        root = args.checkpoint_root or DEFAULT_ROOT
+        checkpoint = published_wam_checkpoint(root, args.variant, args.step)
+        experiment = (args.experiment_contract or root / 'connection_test/experiment_contract.json').resolve(strict=True)
+        validate_experiment(experiment, validate_checkpoint(checkpoint, step=args.step)['contract'])
+    else:
+        checkpoint = published_checkpoint(args.checkpoint_root or CHECKPOINT_ROOT, args.variant, args.step)
     tokenizer, vae = args.tokenizer.resolve(strict=True), args.vae.resolve(strict=True)
     observation = args.warmup_observation.resolve(strict=True)
     if not tokenizer.is_dir() or not (tokenizer / "tokenizer_config.json").is_file() or not vae.is_file():
         raise ValueError("Provide the complete local tokenizer and Wan VAE")
     if not observation.is_file() or observation.suffix != ".npz" or not 1 <= args.port <= 65535 or args.warmup_runs < 1:
         raise ValueError("Invalid warm-up observation, port, or warm-up count")
-    output = ROOT / "outputs" / ("server-" + args.variant)
+    output = ROOT / "outputs" / (("server-wam-" if mode == 'wam' else "server-") + args.variant)
+    if mode == 'wam' and not args.dry_run:
+        idle_gpu(args.gpu)
     command = container(args.gpu, output, args.dry_run)
     # Serving is the one runtime that accepts network requests. The host port
     # remains loopback-only; an SSH tunnel is required from the 5090.
     command[command.index("--network=none")] = "--network=bridge"
-    command += ["--name", "cosmos-bg2-" + args.variant + "-server", "-p", f"127.0.0.1:{args.port}:8008"]
+    command += ["--name", "cosmos-bg2-" + ("wam-" if mode == 'wam' else '') + args.variant + "-server",
+                "-p", f"127.0.0.1:{args.port}:8008"]
     command += bind(checkpoint, "/checkpoint") + bind(observation, "/input/warmup.npz")
     mounts, inside = tokenizer_bind(tokenizer)
     command += mounts + bind(vae, "/assets/Wan2.2_VAE.pth") + bind(args.adapter_dir.resolve(strict=True), "/adapter")
+    if mode == 'wam':
+        command += bind(experiment, '/input/experiment_contract.json')
+    interval = args.guidance_interval
+    if mode == 'wam' and interval is None and args.variant == 'edge' and not args.guidance_all_steps:
+        interval = [960., 1001.]
     command += [BASE_IMAGE if args.image == "base" else POLICY_IMAGE, "/app/inference_server.py",
                 "--bind", "0.0.0.0", "--port", "8008", "--checkpoint", "/checkpoint", "--tokenizer", inside,
                 "--vae", "/assets/Wan2.2_VAE.pth", "--warmup-observation", "/input/warmup.npz",
                 "--warmup-runs", str(args.warmup_runs),
                 "--seed", str(args.seed), "--steps", str(args.steps), "--guidance", str(args.guidance), "--shift", str(args.shift)]
-    if args.guidance_interval:
-        command += ["--guidance-interval", *map(str, args.guidance_interval)]
+    if mode == 'wam':
+        command += ['--mode', 'wam', '--experiment-contract', '/input/experiment_contract.json', '--step', str(args.step)]
+    if interval:
+        command += ["--guidance-interval", *map(str, interval)]
     checked(command, args.dry_run)
 
 
@@ -317,7 +335,9 @@ def main() -> int:
     infer.add_argument("--guidance-interval", nargs=2, type=float)
     infer.add_argument("--dry-run", action="store_true")
     server = commands.add_parser("serve", help="Persistent localhost inference API; connect through SSH")
-    server.add_argument("--checkpoint-root", type=Path, default=CHECKPOINT_ROOT)
+    server.add_argument("--checkpoint-root", type=Path, help="Defaults to the selected policy/WAM export root")
+    server.add_argument("--mode", choices=('policy', 'wam'), default='policy')
+    server.add_argument("--experiment-contract", type=Path)
     server.add_argument("--variant", choices=("edge", "nano"), required=True)
     server.add_argument("--step", type=int, default=20000)
     server.add_argument("--gpu", required=True)
@@ -332,7 +352,9 @@ def main() -> int:
     server.add_argument("--steps", type=int, default=4)
     server.add_argument("--guidance", type=float, default=3.)
     server.add_argument("--shift", type=float, default=5.)
-    server.add_argument("--guidance-interval", nargs=2, type=float)
+    server_guidance = server.add_mutually_exclusive_group()
+    server_guidance.add_argument("--guidance-interval", nargs=2, type=float)
+    server_guidance.add_argument("--guidance-all-steps", action='store_true')
     server.add_argument("--dry-run", action="store_true")
     dream = commands.add_parser("wam", help="Offline synchronous WAM actions + imagined MP4; no hardware/network")
     from wam_checkpoint import DEFAULT_ROOT

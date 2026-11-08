@@ -127,21 +127,34 @@ class RunRecorder:
             if errors:raise RecordingError('; '.join(errors))
 
 
-def save_model_result(root,observation,result,response,sampling):
-    folder=Path(root)/'requests'/response['epoch']/response['request_id']
+def save_model_result(root,observation,result,response,sampling,*,request_group='requests'):
+    folder=Path(root)/request_group/response['epoch']/response['request_id']
     folder.mkdir(parents=True,exist_ok=False)
     save_inputs(folder/'inputs',observation)
     write_json(folder/'prediction.json',response)
     if 'normalized' in result:
         with (folder/'normalized_actions.npy').open('xb') as f:np.save(f,result['normalized'],allow_pickle=False)
+    mode=result.get('mode','policy')
+    if mode=='wam':
+        from bg2_wam import save_rollout
+        with (folder/'raw_joint_positions.npy').open('xb') as f:np.save(f,result['positions'],allow_pickle=False)
+        with (folder/'joint_positions.npy').open('xb') as f:np.save(f,np.asarray(response['positions']),allow_pickle=False)
+        rollout=save_rollout(folder,result['imagined_video'])
     visuals=[]
     for i,latent in enumerate(result.get('vision',[])):
         stem=f'vision_{i:03d}'
         with (folder/(stem+'_latent.npy')).open('xb') as f:np.save(f,latent,allow_pickle=False)
         entry={'latent':stem+'_latent.npy','latent_shape':list(latent.shape),
-               'kind':'conditioned_context_latent','decoded_frames':0}
+               'kind':'generated_wam_rollout_latent' if mode=='wam' else 'conditioned_context_latent',
+               'decoded_frames':17 if mode=='wam' else 0}
         visuals.append(entry)
     write_json(folder/'model_output.json',{'sampling':sampling,'prompt':result.get('prompt'),
-               'visuals':visuals,'mode':'policy','imagined_future_rollout':False,
-               'note':'Policy mode returns the conditioned visual latent; no future-video generation or VAE decoding is requested.'})
-    return {'directory':folder.relative_to(root).as_posix(),'visuals':visuals}
+               'visuals':visuals,'mode':mode,'imagined_future_rollout':mode=='wam',
+               'runtime_metadata':result.get('runtime_metadata'),
+               'note':('Joint WAM sample; raw actions retained, RPC commands floor negative right-gripper values at zero.' if mode=='wam' else
+                   'Policy mode returns the conditioned visual latent; no future-video generation or VAE decoding is requested.')})
+    artifacts={'directory':folder.relative_to(root).as_posix(),'visuals':visuals}
+    if mode=='wam':
+        artifacts.update({'mode':'wam','rollout':rollout,'videos':{name:name+'.mp4' for name in
+            ['imagined_future','rollout_full','imagined_head','imagined_wrist_left','imagined_wrist_right']}})
+    return artifacts

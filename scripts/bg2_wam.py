@@ -117,6 +117,7 @@ def decoded_rgb(decoded):
 
 
 def write_mp4(path, frames, fps=20):
+    import os
     import subprocess
     path = Path(path)
     if path.exists():
@@ -126,13 +127,17 @@ def write_mp4(path, frames, fps=20):
     # Keep FFmpeg outside the CUDA/PyTorch process: the image's in-process PyAV
     # round-trip stalled after encoding during GPU validation. No model work is
     # asynchronous; run() waits for each export and verification to finish.
+    # Bound codec/filter and linked math-library pools in the export subprocesses.
+    # This does not change the model process's CPU or CUDA configuration.
+    media_env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+        "-filter_threads", "1", "-filter_complex_threads", "1",
         "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", f"{frames.shape[2]}x{frames.shape[1]}",
         "-framerate", str(fps), "-i", "pipe:0", "-an", "-c:v", "libx264", "-threads", "2",
         "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path)],
-        input=frames.tobytes(), check=True)
-    result = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
-        "-show_entries", "stream=nb_read_frames,width,height,avg_frame_rate", "-of", "json", str(path)], text=True)
+        input=frames.tobytes(), check=True, env=media_env)
+    result = subprocess.check_output(["ffprobe", "-v", "error", "-threads", "1", "-select_streams", "v:0", "-count_frames",
+        "-show_entries", "stream=nb_read_frames,width,height,avg_frame_rate", "-of", "json", str(path)], text=True, env=media_env)
     stream = json.loads(result)["streams"][0]
     from fractions import Fraction
     if (int(stream["nb_read_frames"]) != len(frames) or int(stream["width"]) != frames.shape[2] or
