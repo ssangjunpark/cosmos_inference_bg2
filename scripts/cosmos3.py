@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build NVIDIA's environment and run one recorded native policy sample."""
+"""Build NVIDIA's environment and run BG2 policy or offline WAM inference."""
 from __future__ import annotations
 
 import argparse
@@ -222,6 +222,71 @@ def doctor(args: argparse.Namespace) -> None:
     checked(command + [image, "/app/doctor_runtime.py", "--expected-commit", REVISION], args.dry_run)
 
 
+def idle_gpu(gpu: str) -> dict:
+    """Reject occupied GPUs; never stop another workload to make room."""
+    if not gpu.isdecimal():
+        raise ValueError("--gpu must select one physical GPU index")
+    info = subprocess.check_output(["nvidia-smi", f"--id={gpu}",
+        "--query-gpu=uuid,memory.used,utilization.gpu", "--format=csv,noheader,nounits"], text=True).strip().split(",")
+    uuid_value, memory, utilization = [v.strip() for v in info]
+    running = subprocess.check_output(["nvidia-smi", "--query-compute-apps=gpu_uuid", "--format=csv,noheader"], text=True).splitlines()
+    if uuid_value in [v.strip() for v in running] or int(memory) > 512 or int(utilization) != 0:
+        raise ValueError(f"GPU {gpu} is occupied; select an idle GPU. No existing process was stopped.")
+    return {"physical_gpu": gpu, "uuid": uuid_value, "used_memory_mib": int(memory), "utilization_percent": int(utilization)}
+
+
+def wam(args: argparse.Namespace) -> None:
+    from wam_checkpoint import published_wam_checkpoint, validate_experiment, validate_checkpoint, file_hash
+    checkpoint = published_wam_checkpoint(args.checkpoint_root, args.variant, args.step, args.sha256)
+    experiment = (args.experiment_contract or args.checkpoint_root / "connection_test/experiment_contract.json").resolve(strict=True)
+    publication = validate_checkpoint(checkpoint, args.variant, args.step)
+    validate_experiment(experiment, publication["contract"])
+    observation, tokenizer, vae = (p.resolve(strict=True) for p in (args.observation, args.tokenizer, args.vae))
+    if not observation.is_file() or observation.suffix != ".npz":
+        raise ValueError("--observation must be a recorded current-observation NPZ")
+    if not (tokenizer / "tokenizer_config.json").is_file() or not vae.is_file():
+        raise ValueError("Provide the matching local tokenizer and Wan VAE")
+    if args.step < 1 or args.steps < 1:
+        raise ValueError("--step and --steps must be positive")
+    if args.check:
+        print(json.dumps({"valid": True, "mode": "wam", "checkpoint": str(checkpoint),
+                          "future_steps": 16, "video_frames": 17, "gpu_started": False,
+                          "checkpoint_writes": False, "full_checksums_checked": args.sha256}))
+        return
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+    output = (args.output or ROOT / "outputs" / f"wam-{args.variant}-{args.step:06d}-{stamp}").resolve()
+    output.relative_to((ROOT / "outputs").resolve())
+    if output.exists():
+        raise ValueError("Use a new WAM output directory; existing results are preserved")
+    command = container(args.gpu, output, args.dry_run)
+    command.insert(2, "--pull=never")
+    command += bind(checkpoint, "/checkpoint") + bind(observation, "/input/observation.npz")
+    command += bind(experiment, "/input/experiment_contract.json")
+    mounts, inside = tokenizer_bind(tokenizer)
+    command += mounts + bind(vae, "/assets/Wan2.2_VAE.pth") + bind(args.adapter_dir.resolve(strict=True), "/adapter")
+    interval = args.guidance_interval
+    if interval is None and args.variant == "edge" and not args.guidance_all_steps:
+        interval = [960., 1001.]
+    command += [BASE_IMAGE if args.image == "base" else POLICY_IMAGE, "/app/wam_infer.py",
+                "--checkpoint", "/checkpoint", "--step", str(args.step),
+                "--observation", "/input/observation.npz", "--experiment-contract", "/input/experiment_contract.json",
+                "--tokenizer", inside, "--vae", "/assets/Wan2.2_VAE.pth", "--output", "/results",
+                "--seed", str(args.seed), "--steps", str(args.steps), "--guidance", str(args.guidance), "--shift", str(args.shift)]
+    if interval is not None:
+        command += ["--guidance-interval", *map(str, interval)]
+    if args.instruction is not None:
+        command += ["--instruction", args.instruction]
+    if not args.dry_run:
+        gpu = idle_gpu(args.gpu)  # Check immediately before launch, not at plan time.
+        receipt = {"mode": "wam", "execution": "offline_synchronous", "gpu_preflight": gpu,
+                   "checkpoint": str(checkpoint), "checkpoint_writes": False, "command": command,
+                   "metadata_sha256": {n: file_hash(checkpoint / n) for n in
+                       ["READY.json", "VERIFIED.json", "TRANSFER_VERIFIED.json", "config.yaml", "input_contract.json", "vision_contract.py"]}}
+        (output / "launch.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    checked(command, args.dry_run)
+    print(f"WAM actions and imagined rollout: {output}")
+
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -269,6 +334,30 @@ def main() -> int:
     server.add_argument("--shift", type=float, default=5.)
     server.add_argument("--guidance-interval", nargs=2, type=float)
     server.add_argument("--dry-run", action="store_true")
+    dream = commands.add_parser("wam", help="Offline synchronous WAM actions + imagined MP4; no hardware/network")
+    from wam_checkpoint import DEFAULT_ROOT
+    dream.add_argument("--checkpoint-root", type=Path, default=DEFAULT_ROOT)
+    dream.add_argument("--experiment-contract", type=Path)
+    dream.add_argument("--variant", choices=("edge", "nano"), required=True)
+    dream.add_argument("--step", type=int, default=20000)
+    dream.add_argument("--gpu", required=True)
+    dream.add_argument("--image", choices=("base", "policy"), default="base")
+    dream.add_argument("--observation", type=Path, required=True)
+    dream.add_argument("--tokenizer", type=Path, required=True)
+    dream.add_argument("--vae", type=Path, required=True)
+    dream.add_argument("--adapter-dir", type=Path, default=ROOT / "adapters")
+    dream.add_argument("--instruction")
+    dream.add_argument("--output", type=Path)
+    dream.add_argument("--seed", type=int, default=0)
+    dream.add_argument("--steps", type=int, default=4)
+    dream.add_argument("--guidance", type=float, default=3.)
+    dream.add_argument("--shift", type=float, default=5.)
+    interval_options = dream.add_mutually_exclusive_group()
+    interval_options.add_argument("--guidance-interval", type=float, nargs=2)
+    interval_options.add_argument("--guidance-all-steps", action="store_true")
+    dream.add_argument("--sha256", action="store_true", help="Rehash checkpoint shards read-only")
+    dream.add_argument("--check", action="store_true", help="Validate paths/receipts only; no GPU/model launch")
+    dream.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "build":
@@ -283,6 +372,8 @@ def main() -> int:
             if args.step < 1 or args.steps < 1:
                 raise ValueError("--step and --steps must be positive")
             run(args)
+        elif args.command == "wam":
+            wam(args)
         else:
             results = []
             for variant in ("edge", "nano"):

@@ -20,7 +20,7 @@ def relocate_model_config(config, tokenizer, vae):
 
 
 class NativePolicy:
-    def __init__(self, checkpoint, tokenizer, vae, adapter_dir):
+    def __init__(self, checkpoint, tokenizer, vae, adapter_dir, *, model_config_transform=None):
         from cosmos_framework.inference.common.init import init_script
         init_script()
         import torch
@@ -38,6 +38,8 @@ class NativePolicy:
         self.contract = json.loads((self.checkpoint / "input_contract.json").read_text())
         self.provenance = verify_adapter(Path(adapter_dir), self.contract)
         model = relocate_model_config(deserialize_config_dict(self.checkpoint / "config.yaml"), tokenizer, vae)
+        if model_config_transform is not None:
+            model = model_config_transform(model)
         self.target = model["_target_"]
         if self.target != self.provenance["model_target"] or model["config"].get("action_global_asinh") or model["config"].get("action_metric_gripper"):
             raise ValueError("Checkpoint differs from the verified BG2 action contract")

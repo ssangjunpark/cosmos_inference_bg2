@@ -5,6 +5,10 @@ RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model servi
 prepared here first. The gateway is installed on 3sp5090 and the companion is installed on
 FFW; the existing ROBOTIS stack remains separately managed.
 
+For the new WAM checkpoints, use the [offline WAM guide](docs/wam_inference.md).
+It generates joint predictions and imagined videos on PRO 6000 from a recorded observation,
+with networking disabled and checkpoints mounted read-only.
+
 The current control contract is **hold → fresh observation → infer → execute all 16 points
 → hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).
 
