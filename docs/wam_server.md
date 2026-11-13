@@ -1,5 +1,9 @@
 # Persistent WAM server on PRO 6000
 
+For the model and gateway running together on `3sp5090`, use the
+[5090 local inference runbook](5090_local_inference.md). The steps below describe
+the original PRO 6000 deployment.
+
 `serve --mode wam` loads the new WAM checkpoint once and handles the existing gateway's
 blocking `/predict` requests. It jointly generates 16 future joint targets and 16 future
 RGB frames, saves a raw snapshot, then returns the action chunk. A recording-only collector

@@ -39,6 +39,35 @@ class FakeWAM(FakePolicy):
 
 
 class WAMServiceTests(unittest.TestCase):
+    def test_busy_gpu_requires_explicit_server_opt_in(self):
+        import cosmos3
+        import wam_checkpoint
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'tokenizer_config.json').write_text('{}')
+            (root / 'warmup.npz').touch()
+            (root / 'vae.pth').touch()
+            (root / 'experiment.json').write_text('{}')
+            args = ['cosmos3.py', 'serve', '--mode', 'wam', '--variant', 'edge', '--gpu', '0',
+                    '--checkpoint-root', directory, '--tokenizer', directory,
+                    '--vae', str(root / 'vae.pth'), '--adapter-dir', directory,
+                    '--warmup-observation', str(root / 'warmup.npz'),
+                    '--experiment-contract', str(root / 'experiment.json'), '--port', '18008']
+            with mock.patch.object(wam_checkpoint, 'published_wam_checkpoint', return_value=root), \
+                    mock.patch.object(wam_checkpoint, 'validate_checkpoint', return_value={'contract': {}}), \
+                    mock.patch.object(wam_checkpoint, 'validate_experiment'), \
+                    mock.patch.object(cosmos3.subprocess, 'check_output',
+                                      side_effect=['GPU-test, 5000, 20', 'GPU-test\n']), \
+                    mock.patch.object(cosmos3, 'container', return_value=['docker', 'run', '--network=none']), \
+                    mock.patch.object(cosmos3, 'checked') as launch:
+                with mock.patch.object(sys, 'argv', args):
+                    self.assertEqual(cosmos3.main(), 1)
+                launch.assert_not_called()
+                with mock.patch.object(sys, 'argv', args + ['--allow-busy-gpu']):
+                    self.assertEqual(cosmos3.main(), 0)
+                launch.assert_called_once()
+                self.assertIn('127.0.0.1:18008:8008', launch.call_args.args[0])
+
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Torch required by offline CLI')
     def test_offline_cli_reuses_wam_runtime_and_retains_raw_negative_gripper(self):
         from types import SimpleNamespace

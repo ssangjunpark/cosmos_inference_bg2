@@ -206,11 +206,11 @@ def serve(args: argparse.Namespace) -> None:
     if not observation.is_file() or observation.suffix != ".npz" or not 1 <= args.port <= 65535 or args.warmup_runs < 1:
         raise ValueError("Invalid warm-up observation, port, or warm-up count")
     output = ROOT / "outputs" / (("server-wam-" if mode == 'wam' else "server-") + args.variant)
-    if mode == 'wam' and not args.dry_run:
+    if mode == 'wam' and not args.dry_run and not getattr(args, 'allow_busy_gpu', False):
         idle_gpu(args.gpu)
     command = container(args.gpu, output, args.dry_run)
     # Serving is the one runtime that accepts network requests. The host port
-    # remains loopback-only; an SSH tunnel is required from the 5090.
+    # remains loopback-only; clients can run on this host or use an SSH tunnel.
     command[command.index("--network=none")] = "--network=bridge"
     command += ["--name", "cosmos-bg2-" + ("wam-" if mode == 'wam' else '') + args.variant + "-server",
                 "-p", f"127.0.0.1:{args.port}:8008"]
@@ -334,13 +334,15 @@ def main() -> int:
     infer.add_argument("--shift", type=float, default=5.0)
     infer.add_argument("--guidance-interval", nargs=2, type=float)
     infer.add_argument("--dry-run", action="store_true")
-    server = commands.add_parser("serve", help="Persistent localhost inference API; connect through SSH")
+    server = commands.add_parser("serve", help="Persistent localhost inference API; connect locally or through SSH")
     server.add_argument("--checkpoint-root", type=Path, help="Defaults to the selected policy/WAM export root")
     server.add_argument("--mode", choices=('policy', 'wam'), default='policy')
     server.add_argument("--experiment-contract", type=Path)
     server.add_argument("--variant", choices=("edge", "nano"), required=True)
     server.add_argument("--step", type=int, default=20000)
     server.add_argument("--gpu", required=True)
+    server.add_argument("--allow-busy-gpu", action="store_true",
+                        help="Explicitly allow sharing the selected GPU with existing workloads (WAM)")
     server.add_argument("--image", choices=("base", "policy"), default="base")
     server.add_argument("--tokenizer", type=Path, required=True)
     server.add_argument("--vae", type=Path, required=True)

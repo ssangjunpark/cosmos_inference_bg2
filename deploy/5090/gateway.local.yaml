@@ -1,0 +1,9 @@
+# Combine with ~/cosmos_bg2_gateway/compose.yaml. Keep recordings off the OS disk.
+services:
+  gateway:
+    volumes:
+      - type: bind
+        source: /mnt/sata1/cosmos3/gateway-logs
+        target: /output
+        bind:
+          create_host_path: false
