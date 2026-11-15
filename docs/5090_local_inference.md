@@ -8,12 +8,17 @@ The commands below use the installed ROBOTIS environment on FFW, with its
 Run commands on the host unless a step explicitly says **inside `ai_worker`**.
 Conda `(base)` can remain active. The model launcher starts Docker automatically.
 
+The Git checkout is `~/Documents/cosmos_inference_bg2` on 5090. Code, tokenizer/VAE
+assets, recorded inputs, and outputs live there. Only the checkpoint remains at
+`/mnt/sata1/cosmos3/checkpoints/edge/020000/`.
+
 For a fresh restart of an existing session, first follow **Stop and reset** below.
 
 ## 1. Start the model — terminal 1, on 5090
 
 ```bash
-bash /mnt/sata1/cosmos3/runtime/deploy/5090/run_edge.sh --allow-busy-gpu
+cd ~/Documents/cosmos_inference_bg2
+bash deploy/5090/run_edge.sh --allow-busy-gpu
 ```
 
 Wait for `"event": "ready"`. Keep this terminal open.
@@ -62,11 +67,9 @@ The companion captures and holds the current robot pose. Keep this terminal open
 Start this after the model is ready and the follower and companion are running.
 
 ```bash
-cd ~/cosmos_bg2_gateway
-COSMOS_PROFILE=./config/profile.execute.json \
-docker compose -f compose.yaml \
-  -f /mnt/sata1/cosmos3/runtime/deploy/5090/gateway.local.yaml \
-  run --rm --no-deps --name cosmos-bg2-execute gateway \
+cd ~/Documents/cosmos_inference_bg2
+COSMOS_PROFILE=./.runtime/5090/profile.execute.json \
+bash deploy/5090/run_gateway.sh \
   execute --profile /config/profile.json \
   --messages-dir /opt/cosmos_gateway/messages \
   --server-url http://127.0.0.1:18008 --timeout 120 \
@@ -75,7 +78,9 @@ docker compose -f compose.yaml \
 ```
 
 This starts robot execution. Change `--instruction` to your task.
-Recordings are saved under `/mnt/sata1/cosmos3/gateway-logs/` on 5090.
+Recordings are saved under `~/Documents/cosmos_inference_bg2/outputs/gateway/`
+on 5090. Earlier runs from the SATA folder have been moved here too, including
+their MP4 exports. Raw model outputs are in `outputs/server-wam-edge/`.
 
 ## Pause or change the task
 

@@ -1,9 +1,43 @@
-# Combine with ~/cosmos_bg2_gateway/compose.yaml. Keep recordings off the OS disk.
+# Standalone gateway configuration; run_gateway.sh sets the project directory
+# to the Git checkout so these paths always resolve relative to its root.
+name: cosmos-gateway
 services:
   gateway:
+    image: cosmos-bg2-gateway:local
+    pull_policy: never
+    network_mode: host
+    user: "${COSMOS_UID:?Run through deploy/5090/run_gateway.sh}:${COSMOS_GID:?Run through deploy/5090/run_gateway.sh}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+    stop_grace_period: 12s
+    pids_limit: 128
+    mem_limit: 1g
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     volumes:
       - type: bind
-        source: /mnt/sata1/cosmos3/gateway-logs
+        source: ./scripts
+        target: /opt/cosmos_gateway/scripts
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./deploy/gateway/messages
+        target: /opt/cosmos_gateway/messages
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${COSMOS_PROFILE:-./profiles/robotis_bg2_rev4.reference.json}
+        target: /config/profile.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./outputs/gateway
         target: /output
         bind:
           create_host_path: false
+    command: ["--help"]

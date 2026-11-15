@@ -14,8 +14,9 @@ The updated [per-run recording guide](docs/run_recordings.md) describes timestam
 downloads to 5090 and per-chunk/combined MP4 construction after the run stops.
 
 To run Edge WAM and the gateway together on `3sp5090`, use the
-[5090 local inference runbook](docs/5090_local_inference.md). It uses the checkpoint
-and assets under `/mnt/sata1/cosmos3` and connects both processes over localhost.
+[5090 local inference runbook](docs/5090_local_inference.md). The full Git checkout
+is at `~/Documents/cosmos_inference_bg2` on 5090; only checkpoints stay under
+`/mnt/sata1/cosmos3/checkpoints`. Both processes connect over localhost.
 
 The current control contract is **hold → fresh observation → infer → execute all 16 points
 → hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).
