@@ -1,5 +1,8 @@
 # cosmos_inference_bg2
 
+For the fixed-base **FFW-SG2** connected to a 5090, start with the
+[SG2 robot-side companion](deploy/sg2/README.md).
+
 RobotEscape Cosmos 3 Edge/Nano inference, with a persistent PRO 6000 model service, a thin
 5090 observation gateway, and a companion for the existing FFW-BG2 controllers. All code is
 prepared here first. The gateway is installed on 3sp5090 and the companion is installed on

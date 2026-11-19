@@ -5,7 +5,7 @@ import math
 import re
 import uuid
 
-from .core import (MAX_ANGULAR_ERROR, MAX_ANGULAR_VELOCITY, angular_names,
+from .core import (MAX_ANGULAR_ERROR, MAX_ANGULAR_VELOCITY, SG2, angular_names, policy_groups,
                    hold_messages, require, safety_require, trajectories)
 
 SCHEMA = "cosmos_bg2_joint_chunk_v1"  # Model RPC remains output-only and unchanged.
@@ -17,10 +17,14 @@ class ChunkExecutor:
     """Execute all points, publish the final-command hold, then open the next cycle."""
     def __init__(self, startup):
         self.startup = startup
+        sg2 = startup.profile["robot"] == SG2
+        self.chunk_schema = "cosmos_sg2_joint_chunk_v1" if sg2 else SCHEMA
+        self.control_schema = "cosmos_sg2_control_v1" if sg2 else "cosmos_bg2_control_v1"
+        self.status_schema = "cosmos_sg2_status_v3" if sg2 else STATUS_SCHEMA
         self.cycle, self.ready_since_ns, self.execution_end_ns = 0, 0, 0
         self.last_source_ns = 0
         self.last_commands, self.last_request_id, self.last_completed_request_id = None, None, None
-        self.last_clock, self.start_positions, self.right_hold = None, None, None
+        self.last_clock, self.start_positions, self.policy_hold = None, None, None
         self.seen = deque(maxlen=128)
         self.tracking_warning_at = {}
 
@@ -33,7 +37,7 @@ class ChunkExecutor:
         self.last_clock = robot_ns, monotonic_ns
 
     def accept(self, chunk, feedback, now_ns, *, submit=None):
-        require(isinstance(chunk, dict) and chunk.get("schema") == SCHEMA, "Unknown chunk schema")
+        require(isinstance(chunk, dict) and chunk.get("schema") == self.chunk_schema, "Unknown chunk schema")
         require(chunk.get("execution_contract") == EXECUTION_CONTRACT, "Synchronous execution contract required")
         require(chunk.get("epoch") == self.startup.epoch, "Prediction belongs to another initialization session")
         ident = chunk.get("request_id")
@@ -53,16 +57,26 @@ class ChunkExecutor:
         self.start_positions = dict(feedback.positions)
         self.last_source_ns, self.last_request_id = source, ident
         self.last_commands = commands
-        self.execution_end_ns = now_ns + 800_000_000
-        self.right_hold = dict(zip(chunk["joint_names"], chunk["positions"][-1]))
+        timing = self.startup.profile["policy"]
+        self.execution_end_ns = now_ns + timing["future_steps"] * timing["frame_interval_ns"]
+        self.policy_hold = dict(zip(chunk["joint_names"], chunk["positions"][-1]))
         self.seen.append(ident)
         self.startup.phase = "running"
         return commands
 
+    @property
+    def right_hold(self):
+        return self.policy_hold
+
     def expected_right(self, source_ns):
+        return self.expected_arm("arm_right", source_ns)
+
+    def expected_arm(self, group, source_ns):
         if self.startup.phase != "running" or self.last_commands is None:
-            return self.right_hold or self.startup.hold
-        msg = self.last_commands["arm_right"]["message"]
+            pose = self.policy_hold or self.startup.hold
+            joints = self.startup.profile["commands"][group]["joint_names"]
+            return {n: pose[n] for n in joints}
+        msg = self.last_commands[group]["message"]
         start = msg["header"]["stamp"]["sec"] * 10**9 + msg["header"]["stamp"]["nanosec"]
         elapsed = max(0, source_ns - start)
         before, previous = 0, [self.start_positions[n] for n in msg["joint_names"]]
@@ -79,10 +93,13 @@ class ChunkExecutor:
         if self.startup.phase not in ("ready", "running", "holding", "paused"):
             return
         expected = dict(self.startup.hold)
-        expected.update(self.expected_right(feedback.source_ns))
+        for group in policy_groups(self.startup.profile):
+            expected.update(self.expected_arm(group, feedback.source_ns))
         for name in angular_names(self.startup.profile):
-            safety_require(abs(feedback.velocities[name]) <= MAX_ANGULAR_VELOCITY,
-                           f"Measured angular velocity exceeds {MAX_ANGULAR_VELOCITY:g} rad/s: {name}")
+            velocity_limit = (self.startup.profile["reference_limits"][name]["velocity"]
+                              if self.startup.profile["robot"] == SG2 else MAX_ANGULAR_VELOCITY)
+            safety_require(abs(feedback.velocities[name]) <= velocity_limit,
+                           f"Measured angular velocity exceeds {velocity_limit:g} rad/s: {name}")
             error = abs(feedback.positions[name] - expected[name])
             if error > MAX_ANGULAR_ERROR + 1e-9:
                 last_warning = self.tracking_warning_at.get(name)
@@ -105,11 +122,11 @@ class ChunkExecutor:
             commands = hold_messages(feedback, self.startup, now_ns, include_right=True)
             if submit is not None:
                 submit(commands)
-            self.right_hold = {n: self.startup.hold[n] for n in self.startup.profile["policy"]["joint_names"]}
+            self.policy_hold = {n: self.startup.hold[n] for n in self.startup.profile["policy"]["joint_names"]}
             self.ready_since_ns = now_ns
             return commands
         if self.startup.phase == "running" and now_ns >= self.execution_end_ns:
-            commands = hold_messages(feedback, self.startup, now_ns, include_right=True, right_positions=self.right_hold)
+            commands = hold_messages(feedback, self.startup, now_ns, include_right=True, right_positions=self.policy_hold)
             if submit is not None:
                 submit(commands)
             self.startup.phase = "holding"
@@ -129,7 +146,7 @@ class ChunkExecutor:
         if submit is not None:
             submit(commands)
         self.startup.hold = dict(feedback.positions)
-        self.right_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
+        self.policy_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
         self.execution_end_ns, self.ready_since_ns = 0, 0
         self.last_commands = commands
         self.startup.phase, self.startup.epoch = "paused", uuid.uuid4().hex
@@ -144,7 +161,7 @@ class ChunkExecutor:
         if submit is not None:
             submit(commands)
         self.startup.hold = dict(feedback.positions)
-        self.right_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
+        self.policy_hold = {n: feedback.positions[n] for n in self.startup.profile["policy"]["joint_names"]}
         self.startup.phase, self.startup.epoch = "holding", uuid.uuid4().hex
         self.cycle += 1
         self.execution_end_ns, self.ready_since_ns = 0, now_ns
@@ -159,7 +176,7 @@ class ChunkExecutor:
         return hold_messages(feedback, self.startup, now_ns, include_right=True, stop_all=True)
 
     def status(self, now_ns):
-        return {"schema": STATUS_SCHEMA, "execution_contract": EXECUTION_CONTRACT,
+        return {"schema": self.status_schema, "execution_contract": EXECUTION_CONTRACT,
                 "epoch": self.startup.epoch, "phase": self.startup.phase, "robot_now_ns": now_ns,
                 "cycle": self.cycle, "ready_since_ns": self.ready_since_ns,
                 "execution_end_ns": self.execution_end_ns,

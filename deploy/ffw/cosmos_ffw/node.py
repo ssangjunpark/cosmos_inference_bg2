@@ -6,7 +6,8 @@ import signal
 import time
 import uuid
 
-from .core import BridgeError, SafetyStop, CONTROLLERS, GROUPS, JointFeedback, Startup, hold_messages, load_home_yaml, require, stamp_ns, validate_profile
+from .core import (CONTROLLERS, SG2, BridgeError, JointFeedback, SafetyStop, Startup,
+                   command_groups, load_home_yaml, require, stamp_ns, validate_profile)
 from .chunks import ChunkExecutor
 from .ros_messages import joint_trajectory
 
@@ -19,6 +20,8 @@ def make_node(profile, home, mode, *, require_homing=True):
     from trajectory_msgs.msg import JointTrajectory
     from action_msgs.msg import GoalStatusArray
     from controller_manager_msgs.srv import ListControllers
+
+    groups = command_groups(profile)
 
     class Companion(Node):
         def __init__(self):
@@ -98,7 +101,8 @@ def make_node(profile, home, mode, *, require_homing=True):
                 response = future.result()
                 require(response is not None, "No controller response")
                 by_name = {c.name: c for c in response.controller}
-                for group, name in CONTROLLERS.items():
+                for group in groups:
+                    name = CONTROLLERS[group]
                     require(name in by_name and by_name[name].state == "active", f"Controller is not active: {name}")
                     interfaces = {n + "/position" for n in profile["commands"][group]["joint_names"]}
                     require(interfaces <= set(by_name[name].claimed_interfaces), f"Wrong command interfaces: {name}")
@@ -107,19 +111,26 @@ def make_node(profile, home, mode, *, require_homing=True):
                 self.controller_ok_at = 0.
                 self.reason = str(error)
 
-        def owners_ok(self, *, allow_missing_self=False):
-            for group in GROUPS:
+        def controller_subscribed(self, group):
+            topic = profile["commands"][group]["topic"]
+            if profile["robot"] == SG2:
+                return any(ep.node_name == CONTROLLERS[group] and ep.node_namespace == "/"
+                           for ep in self.get_subscriptions_info_by_topic(topic))
+            return self.count_subscribers(topic) >= 1
+
+        def owners_ok(self, checked_groups=groups, *, allow_missing_self=False):
+            for group in checked_groups:
                 spec = profile["commands"][group]
                 endpoints = self.get_publishers_info_by_topic(spec["topic"])
                 foreign = [ep for ep in endpoints if ep.node_name != self.get_name() or ep.node_namespace != self.get_namespace()]
                 require(not foreign and len(endpoints) <= 1, f"Competing command publisher: {group}")
                 if not allow_missing_self:
                     require(len(endpoints) == 1, f"Own command publisher is not visible: {group}")
-                    require(self.count_subscribers(spec["topic"]) >= 1, f"No controller subscriber: {group}")
+                    require(self.controller_subscribed(group), f"No controller subscriber: {group}")
 
-        def guard(self):
+        def guard(self, checked_groups=groups):
             require(self.controller_ok_at > 0 and time.monotonic() - self.controller_ok_at <= 1., "Controller health lease expired")
-            self.owners_ok()
+            self.owners_ok(checked_groups)
 
         def activate(self):
             if self.mode != "execute" or self.command_publishers:
@@ -128,20 +139,34 @@ def make_node(profile, home, mode, *, require_homing=True):
             require(self.controller_ok_at > 0 and time.monotonic() - self.controller_ok_at <= 1., "Waiting for active position controllers")
             self.owners_ok(allow_missing_self=True)
             self.activation_started = time.monotonic()
-            for group in GROUPS:
+            for group in groups:
                 self.command_publishers[group] = self.create_publisher(JointTrajectory, profile["commands"][group]["topic"], 1)
 
         def send(self, commands):
             if self.mode != "execute":
                 return
-            self.guard()
+            self.guard(commands)
             # Convert all groups before publishing any; use the existing JTC to
             # buffer/interpolate the complete trajectory at its own update rate.
             prepared = {group: joint_trajectory(bundle["message"]) for group, bundle in commands.items()}
             for group in ("arm_left", "head", "lift", "arm_right"):
                 if group in prepared:
-                    self.command_publishers[group].publish(prepared[group])
+                    try:
+                        self.command_publishers[group].publish(prepared[group])
+                    except Exception as error:
+                        raise RuntimeError(f"{group} trajectory publication failed: {error}") from error
                     self.command_count += 1
+
+        def send_stop(self, commands):
+            if profile["robot"] != SG2:
+                self.send(commands)
+                return
+            # A failed or disconnected arm must not prevent a measured hold on its peer.
+            for group, command in commands.items():
+                try:
+                    self.send({group: command})
+                except Exception as error:
+                    self.get_logger().error(f"Could not send {group} stop hold: {error}")
 
         def chunk(self, msg):
             try:
@@ -168,7 +193,7 @@ def make_node(profile, home, mode, *, require_homing=True):
             try:
                 require(len(msg.data.encode()) <= 1024, "Oversized control message")
                 data = json.loads(msg.data)
-                require(data.get("schema") == "cosmos_bg2_control_v1" and data.get("epoch") == self.startup.epoch,
+                require(data.get("schema") == self.engine.control_schema and data.get("epoch") == self.startup.epoch,
                         "Control message session mismatch")
                 command = data.get("command")
                 require(command in {"pause", "resume", "stop"}, "Unknown control command")
@@ -197,7 +222,7 @@ def make_node(profile, home, mode, *, require_homing=True):
             try:
                 commands = self.engine.stop(self.feedback, self.now(), fault=True)
                 if commands is not None and self.command_publishers and not self.stop_sent:
-                    self.send(commands)
+                    self.send_stop(commands)
                     self.stop_sent = True
             except Exception:
                 # Missing feedback/ownership must not create invented stop positions.
@@ -223,7 +248,7 @@ def make_node(profile, home, mode, *, require_homing=True):
                             self.activate()
                             self.owners_ok(allow_missing_self=True)
                             visible = all(len(self.get_publishers_info_by_topic(profile["commands"][g]["topic"])) == 1 and
-                                          self.count_subscribers(profile["commands"][g]["topic"]) >= 1 for g in GROUPS)
+                                          self.controller_subscribed(g) for g in groups)
                             if not visible and not self.initial_hold_sent:
                                 require(time.monotonic() - self.activation_started < 1., "Controller endpoints did not appear")
                                 self.reason, can_tick = "Waiting for command endpoint discovery", False
@@ -250,7 +275,7 @@ def make_node(profile, home, mode, *, require_homing=True):
             try:
                 commands = self.engine.stop(self.feedback, self.now())
                 if commands is not None and self.command_publishers:
-                    self.send(commands)
+                    self.send_stop(commands)
             except Exception as error:
                 self.get_logger().error("Could not send shutdown hold: " + str(error))
             self.closing = True
@@ -275,7 +300,7 @@ def main():
     parser.add_argument("--check", action="store_true", help="Validate files only; do not import/init ROS or connect")
     args = parser.parse_args()
     profile = json.loads(args.profile.read_text())
-    validate_profile(profile, live=args.mode == "execute", execute=args.mode == "execute")
+    validate_profile(profile, companion=True, live=args.mode == "execute", execute=args.mode == "execute")
     home = load_home_yaml(args.initial_positions, profile)
     if args.check:
         print(json.dumps({"valid": True, "mode": args.mode, "homing_groups": sorted(home), "initialization": args.initialization, "robot_connection_opened": False}))

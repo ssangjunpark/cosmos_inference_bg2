@@ -16,6 +16,7 @@ from bg2_bridge.chunks import ChunkExecutor, EXECUTION_CONTRACT, SCHEMA
 from package_ffw import build
 
 HOME = ROOT / "third_party/ai_worker/ffw_bringup/config/ffw_bg2_rev4_follower/ffw_bg2_follower_initial_positions.yaml"
+SG2_HOME = ROOT / "third_party/ai_worker/ffw_bringup/config/ffw_sg2_rev1_follower/ffw_sg2_follower_initial_positions.yaml"
 BASE = 10_000_000_000
 
 
@@ -385,7 +386,7 @@ class NodeWiringTests(unittest.TestCase):
                 sys.modules.pop(name)
         cls.folder.cleanup()
 
-    def node(self, mode, *, require_homing=True):
+    def node(self, mode, *, require_homing=True, sg2=False):
         from types import SimpleNamespace as NS, ModuleType
         from unittest import mock
         class Message:
@@ -419,6 +420,11 @@ class NodeWiringTests(unittest.TestCase):
                 if topic in self.foreign:result.append(NS(node_name='another_policy',node_namespace='/'))
                 return result
             def count_subscribers(self,topic):return 1
+            def get_subscriptions_info_by_topic(self, topic):
+                for side in ("left", "right"):
+                    if topic == p["commands"]["arm_" + side]["topic"]:
+                        return [NS(node_namespace="/", node_name="arm_" + side[0] + "_controller")]
+                return []
             def get_logger(self):return NS(error=lambda message:None)
         modules={}
         for name in ['rclpy.node','rclpy.qos','sensor_msgs.msg','std_msgs.msg','trajectory_msgs.msg','action_msgs.msg','controller_manager_msgs','controller_manager_msgs.srv']:
@@ -433,7 +439,8 @@ class NodeWiringTests(unittest.TestCase):
         modules['trajectory_msgs.msg'].JointTrajectory=Trajectory
         modules['action_msgs.msg'].GoalStatusArray=Message
         modules['controller_manager_msgs.srv'].ListControllers=NS(Request=Message)
-        p=profile();home=load_home_yaml(HOME,p)
+        p = json.loads((ROOT / 'profiles/robotis_sg2_rev1.reference.json').read_text()) if sg2 else profile()
+        home = load_home_yaml(SG2_HOME if sg2 else HOME, p)
         with mock.patch.dict(sys.modules,modules):
             node=self.module.make_node(p,home,mode,require_homing=require_homing)
         patcher=mock.patch.object(self.module,'joint_trajectory',lambda data:NS(data=data));patcher.start();self.addCleanup(patcher.stop)
@@ -442,14 +449,109 @@ class NodeWiringTests(unittest.TestCase):
 
     def make_ready(self, node):
         from types import SimpleNamespace as NS
-        for group in GROUPS:node.startup.homing_status(group,4,BASE)
+        for group in node.startup.home:node.startup.homing_status(group,4,BASE)
         for i in range(12):
             now=BASE+i*50_000_000
-            frame=feedback(profile(),now)
+            frame=feedback(node.startup.profile,now)
             node.robot_ns=now
             node.startup.update(frame,now)
             node.feedback=frame
         return node
+
+    def test_sg2_named_bimanual_chunk_and_holds_on_arm_topics_only(self):
+        import time
+        from types import SimpleNamespace as NS
+        node = self.make_ready(self.node("execute", sg2=True))
+        node.controller_ok_at = time.monotonic()
+        node.tick()
+        self.assertEqual(set(node.command_publishers), {"arm_left", "arm_right"})
+        p = node.startup.profile
+        validate_profile(p, companion=True)
+        with self.assertRaises(BridgeError):
+            validate_profile(p, companion=True, execute=True)
+        with self.assertRaises(BridgeError):
+            validate_profile(p)  # The BG2 gateway cannot drive this companion.
+        self.assertEqual({pub.topic for pub in node.pubs}, {
+            "/cosmos/sg2/status",
+            "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory",
+            "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"})
+        self.assertEqual(json.loads(node.status_pub.sent[-1].data)["schema"], "cosmos_sg2_status_v3")
+        names = p["policy"]["joint_names"][::-1]
+        direction = [-1 if p["reference_limits"][n]["upper"] <= 0 else 1 for n in names]
+        rows = [[(i + 1) * (j + 1) * .0001 * d for j, d in enumerate(direction)] for i in range(16)]
+        payload = dict(chunk(node.startup, node.robot_ns), schema="cosmos_sg2_joint_chunk_v1",
+                       joint_names=names, units=["rad"] * 16, positions=rows)
+        node.chunk(NS(data=json.dumps(payload)))
+        self.assertEqual(node.startup.phase, "running", node.last_rejection)
+        for group, pub in node.command_publishers.items():
+            msg = pub.sent[-1].data
+            self.assertEqual(msg["joint_names"], p["commands"][group]["joint_names"])
+            cols = [names.index(n) for n in msg["joint_names"]]
+            self.assertEqual([pt["positions"] for pt in msg["points"]], [[r[c] for c in cols] for r in rows])
+            self.assertEqual([pt["time_from_start"]["nanosec"] for pt in msg["points"]],
+                             [(i + 1) * 50_000_000 for i in range(16)])
+            self.assertEqual(msg["header"]["stamp"], {"sec": node.robot_ns // 10**9, "nanosec": node.robot_ns % 10**9})
+            first = msg["joint_names"][0]
+            self.assertAlmostEqual(node.engine.expected_arm(group, node.robot_ns + 25_000_000)[first],
+                                   rows[0][names.index(first)] / 2)
+        end = node.engine.execution_end_ns
+        # Advance both clocks together (the node monitors host vs. robot clock jumps).
+        node.engine.last_clock = None
+        node.robot_ns = end
+        node.feedback = feedback(p, end)
+        node.tick()
+        for pub in node.command_publishers.values():
+            msg = pub.sent[-1].data
+            self.assertEqual(msg["points"][0]["positions"], [rows[-1][names.index(n)] for n in msg["joint_names"]])
+        for command in ("pause", "resume"):
+            node.control(NS(data=json.dumps({"epoch": node.startup.epoch, "schema": "cosmos_sg2_control_v1",
+                                              "command": command})))
+            for pub in node.command_publishers.values():
+                self.assertEqual(pub.sent[-1].data["points"][0]["positions"], [0.] * 8)
+
+    def test_sg2_feedback_ignores_mobile_fields_and_chunks_reject_wrong_joint_sets(self):
+        from types import SimpleNamespace as NS
+        node = self.make_ready(self.node("preview", sg2=True))
+        node.tick()
+        p = node.startup.profile
+        names = p["policy"]["joint_names"]
+        frame = JointFeedback.from_arrays(names + ["left_wheel_drive"], [0.] * 16 + [float("nan")],
+                                          [0.] * 17, BASE, BASE, p)
+        self.assertEqual(set(frame.positions), set(names))
+        data = dict(chunk(node.startup, node.robot_ns), schema="cosmos_sg2_joint_chunk_v1",
+                    units=["rad"] * 16, positions=[[0.] * 16 for _ in range(16)])
+        for invalid in (names[:8], names[:-1] + ["left_wheel_drive"], names[:-1] + [names[0]]):
+            node.chunk(NS(data=json.dumps(dict(data, joint_names=invalid))))
+            self.assertEqual(node.startup.phase, "ready")
+            self.assertFalse(node.command_publishers)
+            self.assertIsNone(node.engine.last_request_id)
+        with self.assertRaisesRegex(self.module.BridgeError, "JSON numeric"):
+            node.engine.accept(dict(data, positions=[["0.0"] * 16] * 16), node.feedback, node.robot_ns)
+        for joint, value in (("gripper_l_joint1", -1.), ("arm_r_joint1", .5)):
+            with self.subTest(joint=joint):
+                data["positions"][-1][names.index(joint)] = value
+                with self.assertRaises(self.module.SafetyStop):
+                    node.engine.accept(data, node.feedback, node.robot_ns)
+                data["positions"][-1][names.index(joint)] = 0.
+        self.assertIsNone(node.engine.last_request_id)
+
+    def test_sg2_stops_other_arm_after_partial_publication_failure(self):
+        import time
+        from types import SimpleNamespace as NS
+        from unittest.mock import Mock
+        node = self.make_ready(self.node("execute", sg2=True))
+        node.controller_ok_at = time.monotonic()
+        node.tick()
+        left, right = (node.command_publishers[group] for group in ("arm_left", "arm_right"))
+        right.publish = Mock(side_effect=ValueError("publisher unavailable"))
+        data = dict(chunk(node.startup, node.robot_ns), schema="cosmos_sg2_joint_chunk_v1",
+                    units=["rad"] * 16, positions=[[0.] * 16 for _ in range(16)])
+        node.chunk(NS(data=json.dumps(data)))
+        self.assertEqual(node.startup.phase, "fault")
+        self.assertEqual(len(left.sent[-2].data["points"]), 16)
+        self.assertEqual(left.sent[-1].data["points"][0]["positions"], [0.] * 8)
+        self.assertIsNone(node.engine.last_completed_request_id)
+        self.assertFalse(node.engine.status(node.robot_ns)["needs_chunk"])
 
     def test_preview_creates_no_hardware_publishers_even_after_chunk(self):
         from types import SimpleNamespace as NS

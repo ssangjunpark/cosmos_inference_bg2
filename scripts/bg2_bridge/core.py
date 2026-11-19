@@ -9,6 +9,7 @@ import uuid
 
 import numpy as np
 
+SG2 = "ffw_sg2_rev1"
 GROUPS = ("arm_right", "arm_left", "head", "lift")
 CONTROLLERS = {"arm_right": "arm_r_controller", "arm_left": "arm_l_controller",
                "head": "head_controller", "lift": "lift_controller"}
@@ -54,29 +55,59 @@ def ros_time(value):
 
 
 def all_names(profile):
-    return [name for group in GROUPS for name in profile["commands"][group]["joint_names"]]
+    return [name for group in command_groups(profile) for name in profile["commands"][group]["joint_names"]]
 
 
-def validate_profile(profile, *, live=False, execute=False):
-    require(profile.get("schema") == 1 and profile.get("robot") == "ffw_bg2_rev4", "Unsupported robot profile")
+def command_groups(profile):
+    return ("arm_left", "arm_right") if profile["robot"] == SG2 else GROUPS
+
+
+def policy_groups(profile):
+    return ("arm_left", "arm_right") if profile["robot"] == SG2 else ("arm_right",)
+
+
+def validate_profile(profile, *, live=False, execute=False, companion=False):
+    sg2 = profile.get("robot") == SG2
+    require(profile.get("schema") == 1 and (profile.get("robot") == "ffw_bg2_rev4" or (companion and sg2)),
+            "Unsupported robot profile")
+    groups = command_groups(profile)
+    require(set(profile["commands"]) == set(groups), "Unexpected command groups")
     names = all_names(profile)
-    require(len(names) == len(set(names)) == 19, "Expected 19 unique commanded joints")
-    expected = [f"arm_r_joint{i}" for i in range(1, 8)] + ["gripper_r_joint1"]
-    require(profile["commands"]["arm_right"]["joint_names"] == profile["policy"]["joint_names"] == expected,
-            "Right-arm joint order must match the checkpoint")
+    if sg2:
+        for side in ("left", "right"):
+            spec = profile["commands"]["arm_" + side]
+            letter = side[0]
+            expected = [f"arm_{letter}_joint{i}" for i in range(1, 8)] + [f"gripper_{letter}_joint1"]
+            require(spec["joint_names"] == expected, f"Invalid SG2 {side} controller joints")
+            require(spec["topic"] in (f"/leader/joint_trajectory_command_broadcaster_{side}/joint_trajectory",
+                                      f"/arm_{letter}_controller/joint_trajectory"), f"Invalid SG2 {side} arm topic")
+        require(profile["hold_groups"] == [], "Both SG2 arms must be active")
+        require(profile["policy"]["joint_names"] == names, "Expected both SG2 arm groups")
+        require(profile["bridge_topics"] == {k: "/cosmos/sg2/" + k for k in ("status", "chunk", "control")},
+                "Invalid SG2 bridge topics")
+        require(profile["joint_feedback"] == {"topic": "/joint_states", "msg_type": "sensor_msgs/msg/JointState"},
+                "Invalid SG2 joint state interface")
+    else:
+        require(len(names) == len(set(names)) == 19, "Expected 19 unique commanded joints")
+        expected = [f"arm_r_joint{i}" for i in range(1, 8)] + ["gripper_r_joint1"]
+        require(profile["commands"]["arm_right"]["joint_names"] == profile["policy"]["joint_names"] == expected,
+                "Right-arm joint order must match the checkpoint")
     require(profile["policy"]["future_steps"] == 16 and profile["policy"]["frame_interval_ns"] == 50_000_000,
-            "Expected the trained 16-step, 20 Hz horizon")
+            "Expected the 16-step, 20 Hz companion protocol")
     for name in names:
         limit = profile["reference_limits"][name]
+        if sg2:
+            require(limit["type"] == "revolute", f"Expected SG2 angular joint: {name}")
         require(all(math.isfinite(limit[k]) for k in ("lower", "upper", "velocity")) and
                 limit["lower"] < limit["upper"] and limit["velocity"] > 0, f"Invalid limits for {name}")
-    for group in GROUPS:
+    for group in groups:
         command = profile["commands"][group]
         require(command["msg_type"] == "trajectory_msgs/msg/JointTrajectory" and command["topic"].startswith("/"),
                 "Expected an absolute JointTrajectory topic")
-    require(len({profile["commands"][g]["topic"] for g in GROUPS}) == 4, "Command topics must be distinct")
-    require(set(profile["cameras"]) == {"head", "wrist", "wrist_left"}, "Three camera views are required")
-    if live:
+    require(len({profile["commands"][g]["topic"] for g in groups}) == len(groups), "Command topics must be distinct")
+    if not sg2:
+        require(set(profile["cameras"]) == {"head", "wrist", "wrist_left"}, "Three camera views are required")
+    if live and not sg2:
         for key, camera in profile["cameras"].items():
             require(camera.get("live_to_training_rotation_deg") in (0, 90, 180, 270), f"{key}: verify camera rotation first")
             wh = camera.get("raw_wh")
@@ -101,6 +132,9 @@ class JointFeedback:
         require(len(names) == len(positions) == len(velocities), "Joint names, positions, velocities must align")
         q, v = dict(zip(names, map(float, positions))), dict(zip(names, map(float, velocities)))
         require(set(all_names(profile)) <= q.keys(), "Incomplete joint feedback")
+        if profile["robot"] == SG2:
+            arms = all_names(profile)
+            q, v = {n: q[n] for n in arms}, {n: v[n] for n in arms}
         require(all(math.isfinite(x) for x in [*q.values(), *v.values()]), "Nonfinite joint feedback")
         require(source_ns > 0 and received_ns > 0, "Joint timestamps must be positive")
         return cls(int(source_ns), int(received_ns), q, v)
@@ -135,7 +169,8 @@ def load_home_yaml(path: Path, profile):
     document = yaml.load(path.read_text(), Loader=HomeLoader)
     executors = document.get("/**", document)
     targets = {}
-    for group, controller in CONTROLLERS.items():
+    for group in command_groups(profile):
+        controller = CONTROLLERS[group]
         key = controller.replace("_controller", "_joint_trajectory_executor")
         data = executors[key]["ros__parameters"]
         names = data["joint_names"]
@@ -166,7 +201,7 @@ class Startup:
         self.stable_since = self.last_feedback_ns = None
 
     def homing_status(self, group, status, goal_started_ns):
-        require(group in GROUPS, "Unknown homing group")
+        require(group in command_groups(self.profile), "Unknown homing group")
         # Current-pose mode does not infer homing from controller action statuses.
         if not self.require_homing:
             return
@@ -192,7 +227,7 @@ class Startup:
             raise BridgeError(f"Homing failed: {group}")
         if status == 4:
             self.completed.add(group)
-            if self.completed == set(GROUPS):
+            if self.completed == set(command_groups(self.profile)):
                 self.phase = "settling"
 
     def update(self, feedback, now_ns):
@@ -206,7 +241,7 @@ class Startup:
             return
         self.last_feedback_ns = feedback.source_ns
         if not self.require_homing:
-            for group in GROUPS:
+            for group in command_groups(self.profile):
                 names = self.profile["commands"][group]["joint_names"]
                 check_positions(names, [feedback.positions[n] for n in names], self.profile)
             if self.current_anchor is None:
@@ -218,7 +253,9 @@ class Startup:
                 # Current-pose startup uses the operator's existing angular limit,
                 # not the much tighter homing velocity tolerance on noisy grippers.
                 angular = self.profile["reference_limits"][name]["type"] in ("revolute", "continuous")
-                velocity_limit = MAX_ANGULAR_VELOCITY if not self.require_homing and angular else data["velocity_tolerance"]
+                velocity_limit = data["velocity_tolerance"]
+                if self.profile["robot"] != SG2 and not self.require_homing and angular:
+                    velocity_limit = MAX_ANGULAR_VELOCITY
                 if (abs(feedback.positions[name] - anchor) > data["position_tolerance"] or
                         abs(feedback.velocities[name]) > velocity_limit):
                     settled = False
@@ -242,8 +279,7 @@ class Startup:
 
 def check_positions(names, values, profile):
     require(len(names) == len(values), "Position vector shape mismatch")
-    # Operator removed bridge position-range rejection for every joint.
-    # Retain finite values; velocity/tracking checks are applied separately.
+    # Measured holds use the actual coordinates. SG2 target limits are checked in trajectories().
     for name, value in zip(names, values):
         require(math.isfinite(float(value)), f"Nonfinite joint position: {name}")
 
@@ -260,42 +296,67 @@ def trajectories(prediction, feedback, startup, now_ns):
             "A full chunk can start only while holding after initialization")
     feedback.fresh(now_ns)
     require(prediction.get("epoch") == startup.epoch, "Prediction belongs to another initialization session")
-    require(prediction.get("joint_names") == startup.profile["policy"]["joint_names"], "Prediction joint order mismatch")
-    require(prediction.get("units") == ["rad"] * 8, "Expected recorded radian joint coordinates")
-    values = np.asarray(prediction["positions"], dtype=np.float64)
-    safety_require(values.shape == (16, 8) and np.isfinite(values).all(), "Expected finite 16-by-8 predictions")
+    profile = startup.profile
+    expected = profile["policy"]["joint_names"]
+    names = prediction.get("joint_names")
+    if profile["robot"] == SG2:
+        require(isinstance(names, list) and len(names) == len(expected) and
+                all(isinstance(n, str) for n in names) and set(names) == set(expected),
+                "Expected each SG2 arm and gripper joint exactly once")
+    else:
+        require(names == expected, "Prediction joint order mismatch")
+    require(prediction.get("units") == ["rad"] * len(expected), "Expected recorded radian joint coordinates")
+    steps = profile["policy"]["future_steps"]
+    interval = profile["policy"]["frame_interval_ns"]
+    positions = prediction["positions"]
+    if profile["robot"] == SG2:
+        require(isinstance(positions, list) and all(isinstance(row, list) and
+                all(type(value) in (int, float) for value in row) for row in positions),
+                "SG2 positions must be JSON numeric arrays")
+    values = np.asarray(positions, dtype=np.float64)
+    safety_require(values.shape == (steps, len(expected)) and np.isfinite(values).all(),
+                   f"Expected finite {steps}-by-{len(expected)} predictions")
     source = prediction.get("source_time_ns")
     require(type(source) is int and 0 < source <= now_ns, "Invalid/future observation timestamp")
-    right = startup.profile["commands"]["arm_right"]["joint_names"]
-    for row in values:
-        try:
-            check_positions(right, row, startup.profile)
-        except BridgeError as error:
-            raise SafetyStop(str(error)) from error
-    # Operator requested measured-velocity monitoring only; target steps are unchanged.
-    offsets = [(i + 1) * 50_000_000 for i in range(16)]
+    offsets = [(i + 1) * interval for i in range(steps)]
     result = {}
-    for group in GROUPS:
-        spec = startup.profile["commands"][group]
-        names = spec["joint_names"]
-        rows = values.tolist() if group == "arm_right" else [[startup.hold[n] for n in names] for _ in offsets]
-        check_positions(names, rows[0], startup.profile)
-        result[group] = {"topic": spec["topic"], "message": message(names, rows, offsets, now_ns)}
+    for group in command_groups(profile):
+        spec = profile["commands"][group]
+        joints = spec["joint_names"]
+        if group not in policy_groups(profile):
+            rows = [[startup.hold[n] for n in joints] for _ in offsets]
+        else:
+            rows = values[:, [names.index(n) for n in joints]]
+        if profile["robot"] == SG2:
+            for column, joint in enumerate(joints):
+                limit = profile["reference_limits"][joint]
+                targets = rows[:, column]
+                safety_require(((limit["lower"] <= targets) & (targets <= limit["upper"])).all(),
+                               f"SG2 target outside position limits: {joint}")
+                changes = np.diff(targets, prepend=feedback.positions[joint])
+                safety_require((np.abs(changes) <= limit["velocity"] * interval / 1e9 + 1e-9).all(),
+                               f"SG2 target exceeds joint velocity limit: {joint}")
+        check_positions(joints, rows[0], profile)
+        result[group] = {"topic": spec["topic"], "message": message(joints, rows, offsets, now_ns)}
     return result
 
 
 def hold_messages(feedback, startup, now_ns, *, include_right=False, right_positions=None, stop_all=False):
-    """Normal holds preserve the commanded target; stop_all freezes fresh measured positions."""
+    """Hold active policy arms at the commanded target, or all arms at fresh measurements.
+
+    The include_right and right_positions keywords also cover the left arm on SG2.
+    """
     feedback.fresh(now_ns)
     require(startup.hold is not None, "Hold pose was not captured")
     result = {}
-    for group in GROUPS:
-        if group == "arm_right" and not include_right:
+    for group in command_groups(startup.profile):
+        active = group in policy_groups(startup.profile)
+        if active and not include_right:
             continue
         spec = startup.profile["commands"][group]
         if stop_all:
             row = [feedback.positions[n] for n in spec["joint_names"]]
-        elif group == "arm_right":
+        elif active:
             target = startup.hold if right_positions is None else right_positions
             row = [target[n] for n in spec["joint_names"]]
         else:
