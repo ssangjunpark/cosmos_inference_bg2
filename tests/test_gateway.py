@@ -11,7 +11,7 @@ import unittest
 import uuid
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'tests')]
@@ -91,11 +91,29 @@ class ObservationTests(unittest.TestCase):
         result=obs.snapshot('instruction',ROBOT+10_000_000,receipt_now_ns=MONO+10_000_000,not_before_ns=ROBOT+1)
         self.assertEqual(int(result['source_time_ns']),ROBOT+10_000_000)
 
-    def test_unknown_rotation_dimensions_or_wrong_crop_do_not_get_guessed(self):
+    def test_unknown_rotation_dimensions_or_invalid_crop_do_not_get_guessed(self):
         p=profile()
-        for updates in [{'live_to_training_rotation_deg':None},{'raw_wh':[640,480]},{'crop_xyxy':[0,0,10,10]}]:
+        for updates in [{'live_to_training_rotation_deg':None},{'raw_wh':[640,480]},
+                        {'crop_xyxy':None},{'crop_xyxy':[0,0,0,10]},
+                        {'crop_xyxy':[-1,0,10,10]},{'crop_xyxy':[0,0,673,376]},
+                        {'crop_xyxy':[0,0,10.5,10]},{'crop_xyxy':[0,0,True,10]},
+                        {'output_wh':[256,256]}]:
             spec={**p['cameras']['head'],**updates}
             with self.subTest(updates=updates),self.assertRaises(BridgeError):decode_view(image('head'),'head',spec)
+
+    def test_profile_can_select_full_head_without_the_legacy_crop(self):
+        pixels=np.zeros((376,672,3),np.uint8)
+        pixels[:,:128]=[255,0,0]
+        pixels[:,128:]=[0,255,0]
+        source=Image.fromarray(pixels);stream=BytesIO();source.save(stream,format='PNG')
+        spec={**profile()['cameras']['head'],'crop_xyxy':[0,0,672,376]}
+        result=decode_view(stream.getvalue(),'head',spec)
+        expected=np.asarray(ImageOps.pad(source,(512,384),method=Image.Resampling.BILINEAR,
+                                        color=(0,0,0),centering=(.5,.5)))
+        np.testing.assert_array_equal(result,expected)
+        np.testing.assert_array_equal(result[192,20],[255,0,0])
+        legacy=decode_view(stream.getvalue(),'head',profile()['cameras']['head'])
+        np.testing.assert_array_equal(legacy[192,20],[0,255,0])
 
     def test_explicit_rotation_is_applied_before_wrist_crop(self):
         stream=BytesIO();Image.new('RGB',(424,240),(25,50,75)).save(stream,format='PNG')

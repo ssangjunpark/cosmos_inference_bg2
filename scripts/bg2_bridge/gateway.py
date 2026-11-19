@@ -12,7 +12,7 @@ from PIL import Image
 from .core import JointFeedback, require, stamp_ns
 from .chunks import EXECUTION_CONTRACT, STATUS_SCHEMA
 from .observations import Observations
-from .rpc import identifier
+from .rpc import identifier, InferenceBusy, InferenceNotSubmitted
 from .recording import RecordingError
 
 
@@ -125,6 +125,13 @@ class Gateway:
         except RecordingError:
             self.closed = True
             raise
+        except (InferenceBusy,InferenceNotSubmitted) as error:
+            if self.recorder is not None:
+                self.recorder.request_not_generated(request_id,str(error),
+                    'client_not_submitted' if isinstance(error,InferenceNotSubmitted) else 'server_busy_refusal')
+            self.failed += 1
+            self.next_retry_ns = now_ns + max(1,time.monotonic_ns()-entered_ns) + 100_000_000
+            return {'event':'discarded','reason':str(error),'request_id':request_id,'prediction_generated':False}
         except Exception as error:
             self.failed += 1
             self.next_retry_ns = now_ns + max(1, time.monotonic_ns() - entered_ns) + 100_000_000
@@ -139,7 +146,8 @@ class Gateway:
 
 
 class GatewayTransport:
-    def __init__(self, profile, observations, status, *, inspect=False, sdk=None, messages_dir=None, recorder=None):
+    def __init__(self, profile, observations, status, *, inspect=False, cameras_only=False, sdk=None, messages_dir=None, recorder=None):
+        require(not cameras_only or inspect, 'Camera-only transport must use inspect mode')
         self.profile,self.observations,self.status=profile,observations,status
         self.subscribers,self.chunk_publisher,self.control_publisher=[],None,None
         self.recorder=recorder
@@ -161,8 +169,9 @@ class GatewayTransport:
         if messages_dir is not None:sdk.get_registry(messages_dir=str(messages_dir))
         topics=profile.get('bridge_topics',{})
         try:
-            spec=profile['joint_feedback']
-            self._subscribe(spec['topic'],spec['msg_type'],self._joints)
+            if not cameras_only:
+                spec=profile['joint_feedback']
+                self._subscribe(spec['topic'],spec['msg_type'],self._joints)
             for key,camera in profile['cameras'].items():
                 self._subscribe(camera['topic'],camera['msg_type'],lambda msg,key=key:self._camera(key,msg))
             if not inspect:
@@ -256,6 +265,11 @@ class DebugGateway:
         self.recorder.inputs(request_id,observation,raw);self.requests+=1
         if hasattr(self.recorder,'request'):self.recorder.request(self.epoch,request_id,self.last_source_ns)
         try:result=self.client.predict(observation,self.epoch,request_id)
+        except (InferenceBusy,InferenceNotSubmitted) as error:
+            self.recorder.request_not_generated(request_id,str(error),
+                'client_not_submitted' if isinstance(error,InferenceNotSubmitted) else 'server_busy_refusal')
+            if self.closed:return {'event':'interrupted'}
+            raise
         except Exception:
             if self.closed:return {'event':'interrupted'}
             raise

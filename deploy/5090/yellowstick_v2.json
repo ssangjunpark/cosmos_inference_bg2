@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "variant": "v2",
+  "model_tier": "edge",
+  "step": 18340,
+  "source_root": "/mnt/sata1/lg_wm/ckpt/cosmos3_yellowstick_20261114",
+  "source_checkpoint": "v2/last_step_018340",
+  "prepared_root": ".runtime/5090/yellowstick/v2",
+  "base_profile": ".runtime/5090/profile.execute.json",
+  "gateway_profile": "profiles/yellowstick_v2.execute.json"
+}

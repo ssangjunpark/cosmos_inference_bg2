@@ -79,6 +79,30 @@ class WAMCheckpointTests(unittest.TestCase):
         self.write('VERIFIED.json',d)
         with self.assertRaisesRegex(ValueError,'Unsafe'):validate_checkpoint(self.p)
 
+    def test_separate_model_directory_checks_the_same_files_without_copying(self):
+        weights=self.p/'separate-model';(self.p/'model').rename(weights);(self.p/'model').mkdir()
+        before={p.name:p.read_bytes() for p in weights.iterdir()}
+        self.assertEqual(validate_checkpoint(self.p,model_dir=weights,hashes=True)['tier'],'nano')
+        self.assertEqual(before,{p.name:p.read_bytes() for p in weights.iterdir()})
+        self.assertEqual(list((self.p/'model').iterdir()),[])
+        with self.assertRaises((ValueError,FileNotFoundError)):validate_checkpoint(self.p)
+        (weights/'__0_0.distcp').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'checksum'):
+            validate_checkpoint(self.p,model_dir=weights,hashes=True)
+
+    def test_separate_model_directory_rejects_a_shard_symlink_escape(self):
+        weights=self.p/'separate-model';(self.p/'model').rename(weights);(self.p/'model').mkdir()
+        outside=self.p/'outside.distcp';outside.write_bytes(b'weights')
+        (weights/'__0_0.distcp').unlink();(weights/'__0_0.distcp').symlink_to(outside)
+        with self.assertRaises(ValueError):validate_checkpoint(self.p,model_dir=weights)
+
+    def test_external_model_directory_requires_an_explicit_option(self):
+        with tempfile.TemporaryDirectory() as outside:
+            weights=Path(outside)/'model';(self.p/'model').rename(weights)
+            (self.p/'model').symlink_to(weights,target_is_directory=True)
+            with self.assertRaises(ValueError):validate_checkpoint(self.p)
+            self.assertEqual(validate_checkpoint(self.p,model_dir=weights)['tier'],'nano')
+
     def test_exported_formatter_does_not_create_bytecode_beside_checkpoint(self):
         old=sys.dont_write_bytecode
         try:
@@ -105,14 +129,20 @@ class WAMConfigTests(unittest.TestCase):
     def test_delivered_configs_keep_every_value_except_exact_nano_factory(self):
         import yaml
         root=Path('/mnt/sata1/RobotEscapeCkpt/cosmos3_wam_room20k_20261105')
-        if not (root/'edge/020000/config.yaml').exists():self.skipTest('Local WAM checkpoint unavailable')
-        for tier in ('edge','nano'):
-            model=yaml.safe_load((root/tier/'020000/config.yaml').read_text())['model']
-            overrides=[];runtime=restore_wam_config(model,overrides);expected=copy.deepcopy(model)
-            if tier=='nano':
-                base=expected['config']['vlm_config']['model_instance']['config']['base_config']
-                base['_target_']='cosmos_framework.model.generator.mot.unified_mot.Qwen3VLMoTConfig.from_json_file'
-            self.assertEqual(runtime,expected);self.assertEqual(len(overrides),int(tier=='nano'))
+        for tier in ('edge', 'nano'):
+            with self.subTest(tier=tier):
+                config = root / tier / '020000/config.yaml'
+                if not config.is_file():
+                    self.skipTest(f'Local {tier} WAM checkpoint unavailable')
+                model = yaml.safe_load(config.read_text())['model']
+                overrides = []
+                runtime = restore_wam_config(model, overrides)
+                expected = copy.deepcopy(model)
+                if tier == 'nano':
+                    base = expected['config']['vlm_config']['model_instance']['config']['base_config']
+                    base['_target_'] = 'cosmos_framework.model.generator.mot.unified_mot.Qwen3VLMoTConfig.from_json_file'
+                self.assertEqual(runtime, expected)
+                self.assertEqual(len(overrides), int(tier == 'nano'))
 
     def test_resolves_exported_abstract_nano_factory_without_mutating_saved_config(self):
         prefix='cosmos_framework.model.generator.mot.unified_mot.'

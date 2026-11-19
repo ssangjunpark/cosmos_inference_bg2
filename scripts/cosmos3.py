@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -189,14 +190,18 @@ def run(args: argparse.Namespace) -> None:
     print(f"Results: {output}")
 
 
-def serve(args: argparse.Namespace) -> None:
+def server_command(args: argparse.Namespace) -> list[str]:
+    """Validate a service deployment and construct its Docker command."""
     mode = getattr(args, 'mode', 'policy')
+    model_dir = getattr(args, 'model_dir', None)
+    if model_dir is not None and mode != 'wam':
+        raise ValueError("--model-dir is supported only in WAM mode")
     if mode == 'wam':
         from wam_checkpoint import DEFAULT_ROOT, published_wam_checkpoint, validate_checkpoint, validate_experiment
         root = args.checkpoint_root or DEFAULT_ROOT
-        checkpoint = published_wam_checkpoint(root, args.variant, args.step)
+        checkpoint = published_wam_checkpoint(root, args.variant, args.step, model_dir=model_dir)
         experiment = (args.experiment_contract or root / 'connection_test/experiment_contract.json').resolve(strict=True)
-        validate_experiment(experiment, validate_checkpoint(checkpoint, step=args.step)['contract'])
+        validate_experiment(experiment, validate_checkpoint(checkpoint, step=args.step, model_dir=model_dir)['contract'])
     else:
         checkpoint = published_checkpoint(args.checkpoint_root or CHECKPOINT_ROOT, args.variant, args.step)
     tokenizer, vae = args.tokenizer.resolve(strict=True), args.vae.resolve(strict=True)
@@ -205,16 +210,23 @@ def serve(args: argparse.Namespace) -> None:
         raise ValueError("Provide the complete local tokenizer and Wan VAE")
     if not observation.is_file() or observation.suffix != ".npz" or not 1 <= args.port <= 65535 or args.warmup_runs < 1:
         raise ValueError("Invalid warm-up observation, port, or warm-up count")
-    output = ROOT / "outputs" / (("server-wam-" if mode == 'wam' else "server-") + args.variant)
+    output = (getattr(args, 'output', None) or ROOT / "outputs" /
+              (("server-wam-" if mode == 'wam' else "server-") + args.variant)).resolve()
+    output.relative_to((ROOT / "outputs").resolve())
+    name = (getattr(args, 'container_name', None) or
+            "cosmos-bg2-" + ("wam-" if mode == 'wam' else '') + args.variant + "-server")
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]*', name):
+        raise ValueError('Invalid model container name')
     if mode == 'wam' and not args.dry_run and not getattr(args, 'allow_busy_gpu', False):
         idle_gpu(args.gpu)
     command = container(args.gpu, output, args.dry_run)
     # Serving is the one runtime that accepts network requests. The host port
     # remains loopback-only; clients can run on this host or use an SSH tunnel.
     command[command.index("--network=none")] = "--network=bridge"
-    command += ["--name", "cosmos-bg2-" + ("wam-" if mode == 'wam' else '') + args.variant + "-server",
-                "-p", f"127.0.0.1:{args.port}:8008"]
+    command += ["--name", name, "-p", f"127.0.0.1:{args.port}:8008"]
     command += bind(checkpoint, "/checkpoint") + bind(observation, "/input/warmup.npz")
+    if model_dir is not None:
+        command += bind(model_dir.resolve(strict=True), "/checkpoint/model")
     mounts, inside = tokenizer_bind(tokenizer)
     command += mounts + bind(vae, "/assets/Wan2.2_VAE.pth") + bind(args.adapter_dir.resolve(strict=True), "/adapter")
     if mode == 'wam':
@@ -231,7 +243,11 @@ def serve(args: argparse.Namespace) -> None:
         command += ['--mode', 'wam', '--experiment-contract', '/input/experiment_contract.json', '--step', str(args.step)]
     if interval:
         command += ["--guidance-interval", *map(str, interval)]
-    checked(command, args.dry_run)
+    return command
+
+
+def serve(args: argparse.Namespace) -> None:
+    checked(server_command(args), args.dry_run)
 
 
 def doctor(args: argparse.Namespace) -> None:
@@ -255,9 +271,10 @@ def idle_gpu(gpu: str) -> dict:
 
 def wam(args: argparse.Namespace) -> None:
     from wam_checkpoint import published_wam_checkpoint, validate_experiment, validate_checkpoint, file_hash
-    checkpoint = published_wam_checkpoint(args.checkpoint_root, args.variant, args.step, args.sha256)
+    model_dir = getattr(args, 'model_dir', None)
+    checkpoint = published_wam_checkpoint(args.checkpoint_root, args.variant, args.step, args.sha256, model_dir=model_dir)
     experiment = (args.experiment_contract or args.checkpoint_root / "connection_test/experiment_contract.json").resolve(strict=True)
-    publication = validate_checkpoint(checkpoint, args.variant, args.step)
+    publication = validate_checkpoint(checkpoint, args.variant, args.step, model_dir=model_dir)
     validate_experiment(experiment, publication["contract"])
     observation, tokenizer, vae = (p.resolve(strict=True) for p in (args.observation, args.tokenizer, args.vae))
     if not observation.is_file() or observation.suffix != ".npz":
@@ -279,6 +296,8 @@ def wam(args: argparse.Namespace) -> None:
     command = container(args.gpu, output, args.dry_run)
     command.insert(2, "--pull=never")
     command += bind(checkpoint, "/checkpoint") + bind(observation, "/input/observation.npz")
+    if model_dir is not None:
+        command += bind(model_dir.resolve(strict=True), "/checkpoint/model")
     command += bind(experiment, "/input/experiment_contract.json")
     mounts, inside = tokenizer_bind(tokenizer)
     command += mounts + bind(vae, "/assets/Wan2.2_VAE.pth") + bind(args.adapter_dir.resolve(strict=True), "/adapter")
@@ -336,6 +355,7 @@ def main() -> int:
     infer.add_argument("--dry-run", action="store_true")
     server = commands.add_parser("serve", help="Persistent localhost inference API; connect locally or through SSH")
     server.add_argument("--checkpoint-root", type=Path, help="Defaults to the selected policy/WAM export root")
+    server.add_argument("--model-dir", type=Path, help="Separate read-only WAM model shards; metadata stays under --checkpoint-root")
     server.add_argument("--mode", choices=('policy', 'wam'), default='policy')
     server.add_argument("--experiment-contract", type=Path)
     server.add_argument("--variant", choices=("edge", "nano"), required=True)
@@ -350,6 +370,8 @@ def main() -> int:
     server.add_argument("--warmup-runs", type=int, default=2)
     server.add_argument("--adapter-dir", type=Path, default=ROOT / "adapters")
     server.add_argument("--port", type=int, default=8008)
+    server.add_argument("--container-name", help="Override the model container name for multiple resident services")
+    server.add_argument("--output", type=Path, help="Persistent recording directory under this checkout's outputs/")
     server.add_argument("--seed", type=int, default=0)
     server.add_argument("--steps", type=int, default=4)
     server.add_argument("--guidance", type=float, default=3.)
@@ -361,6 +383,7 @@ def main() -> int:
     dream = commands.add_parser("wam", help="Offline synchronous WAM actions + imagined MP4; no hardware/network")
     from wam_checkpoint import DEFAULT_ROOT
     dream.add_argument("--checkpoint-root", type=Path, default=DEFAULT_ROOT)
+    dream.add_argument("--model-dir", type=Path, help="Separate read-only WAM model shards")
     dream.add_argument("--experiment-contract", type=Path)
     dream.add_argument("--variant", choices=("edge", "nano"), required=True)
     dream.add_argument("--step", type=int, default=20000)

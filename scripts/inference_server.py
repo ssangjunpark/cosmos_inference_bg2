@@ -53,7 +53,9 @@ class PolicyService:
 
     def health(self):
         values = list(self.durations)
+        checkpoint = getattr(self.policy, 'runtime_metadata', {}).get('checkpoint', {})
         return {'ok': True, 'warmed': True, 'schema': 'cosmos_inference_service_v1', 'joint_names': JOINT_NAMES,
+                'model_id': checkpoint.get('dataset_variant'), 'checkpoint': checkpoint,
                 'future_steps': 16, 'frame_interval_ns': 50_000_000, 'loading_seconds': self.policy.loading_seconds,
                 'warmup_seconds': self.warmup_seconds, 'latency_budget_ns': int(max(values) * 1e9),
                 'median_prediction_seconds': statistics.median(values), 'prediction_calls': self.calls,

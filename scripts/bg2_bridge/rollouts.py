@@ -10,6 +10,9 @@ import time
 import numpy as np
 
 from .artifact_protocol import ARTIFACT_API, PUBLIC_FILES, artifact_path, atomic_json, run_name
+from .rpc import RecordingNotAvailable, identifier
+
+TERMINAL_STATES = ('complete', 'failed', 'cancelled')
 
 
 def render_chunk(folder, cancelled=lambda:False):
@@ -85,7 +88,9 @@ class RunRollouts:
         self.path=self.directory/'manifest.json'
         self.client=client
         self.lock=threading.RLock();self.stop_event=threading.Event();self.changed=threading.Event()
-        self.entries=json.loads(self.path.read_text())['chunks'] if resume and self.path.exists() else []
+        saved=json.loads(self.path.read_text()) if resume and self.path.exists() else {}
+        self.entries=saved.get('chunks',[])
+        self.inference_barrier=None
         self.last_error=None
         self.abort_assembly=False
         if resume and not self.entries:
@@ -99,7 +104,6 @@ class RunRollouts:
                 elif observation.is_file():
                     data=json.loads(observation.read_text())
                     previous.append((data['source_time_ns'],folder.name,None,False))
-            from .rpc import identifier
             for source,ident,epoch,received in sorted(previous):
                 identifier(ident)
                 self.entries.append({'index':len(self.entries)+1,'request_id':ident,'epoch':epoch,
@@ -109,6 +113,11 @@ class RunRollouts:
         if resume:
             for item in self.entries:
                 if item['state']=='failed':item['state']='pending'
+            diagnostic=self.root/'diagnostics/pause/diagnostic.json'
+            if diagnostic.is_file():
+                result=json.loads(diagnostic.read_text())
+                if result.get('server_url')==getattr(self.client,'url',None) and result.get('state') in ('complete','forecast_saved'):
+                    self.confirm_inference_barrier(result)
         self.save()
         self.thread=threading.Thread(target=self.work,name='imagined-video-downloads',daemon=True)
         self.thread.start()
@@ -116,7 +125,31 @@ class RunRollouts:
     def save(self):
         atomic_json(self.path,{'schema':ARTIFACT_API,'run_id':self.run_id,'episode_id':self.run_id,'chunks':self.entries,
             'note':'Forecast chunks in request order; inference/hold gaps are not real-time camera footage.',
+            'inference_barrier':self.inference_barrier,
             'last_error':self.last_error})
+
+    def confirm_inference_barrier(self, result):
+        """A later successful diagnostic proves earlier requests finished on this server."""
+        if (result.get('state') not in ('complete','forecast_saved') or result.get('run_id')!=self.run_id or
+                result.get('server_url')!=getattr(self.client,'url',None) or
+                result.get('submitted_to_ffw') is not False or result.get('executed') is not False):
+            raise ValueError('Invalid post-pause recording barrier')
+        identifier(result['request_id']);identifier(result['pause_epoch'])
+        with self.lock:
+            self.inference_barrier={key:result[key] for key in
+                ('run_id','server_url','request_id','pause_epoch','source_time_ns')}
+            self.save()
+        self.changed.set()
+
+    def request_not_generated(self, request_id, reason, proof):
+        with self.lock:
+            entry=next(item for item in self.entries if item['request_id']==request_id)
+            if entry.get('prediction_received') or entry['state']=='complete':
+                raise ValueError('Cannot cancel a received/saved prediction')
+            entry.update(state='cancelled',reason=reason,cancellation_proof=proof,submitted_to_ffw=False)
+            self.last_error=None
+            self.save()
+        self.changed.set()
 
     def register(self, epoch, request_id, source_time_ns):
         with self.lock:
@@ -140,7 +173,7 @@ class RunRollouts:
 
     def work(self):
         while not self.stop_event.is_set():
-            with self.lock:pending=[dict(e) for e in self.entries if e['state'] not in ('complete','failed')]
+            with self.lock:pending=[dict(e) for e in self.entries if e['state'] not in TERMINAL_STATES]
             for item in pending:
                 if self.stop_event.is_set():break
                 try:
@@ -168,13 +201,29 @@ class RunRollouts:
                         entry['state']=status['state']
                         if status.get('error'):entry['error']=status['error']
                         self.save()
+                except RecordingNotAvailable as error:
+                    with self.lock:
+                        entry=next(e for e in self.entries if e['request_id']==item['request_id'])
+                        barrier=self.inference_barrier
+                        if (barrier is not None and not entry.get('prediction_received') and
+                                entry['source_time_ns']<barrier['source_time_ns'] and entry['state'] not in TERMINAL_STATES):
+                            entry.update(state='cancelled',submitted_to_ffw=False,
+                                reason='Interrupted request has no saved prediction after a later diagnostic completed',
+                                cancellation_proof='later_diagnostic_completed',
+                                barrier_request_id=barrier['request_id'])
+                            self.last_error=None
+                        elif entry['state'] not in TERMINAL_STATES and not self.stop_event.is_set():self.last_error=str(error)
+                        self.save()
                 except Exception as error:
                     if not self.stop_event.is_set():
-                        with self.lock:self.last_error=str(error);self.save()
+                        with self.lock:
+                            entry=next(e for e in self.entries if e['request_id']==item['request_id'])
+                            if entry['state'] not in TERMINAL_STATES:self.last_error=str(error)
+                            self.save()
             self.changed.wait(.5);self.changed.clear()
 
     def pending(self):
-        with self.lock:return sum(e['state'] not in ('complete','failed') for e in self.entries)
+        with self.lock:return sum(e['state'] not in TERMINAL_STATES for e in self.entries)
 
     def cancel(self):
         self.abort_assembly=True
@@ -191,7 +240,8 @@ class RunRollouts:
         self.stop_event.set();self.client.cancel();self.changed.set();self.thread.join(timeout=2)
         with self.lock:
             complete=[dict(entry) for entry in self.entries if entry['state']=='complete']
-            missing=[dict(entry) for entry in self.entries if entry['state']!='complete']
+            missing=[dict(entry) for entry in self.entries if entry['state'] not in ('complete','cancelled')]
+            skipped=[dict(entry) for entry in self.entries if entry['state']=='cancelled']
         if complete:
             try:
                 print(json.dumps({'event':'rendering_recordings','chunks':len(complete),
@@ -209,6 +259,7 @@ class RunRollouts:
                     {**e,'first_frame':index*16,'last_frame':index*16+15} for index,e in enumerate(complete)],
                     'frame_count':len(complete)*16,'pending':self.pending(),
                     'missing_chunks':missing,'partial':bool(missing),
+                    'skipped_cancelled_requests':skipped,
                     'note':'Concatenated imagined forecasts, not continuous physical time.'})
                 run_meta=self.root/'run.json'
                 if run_meta.exists():
@@ -220,5 +271,6 @@ class RunRollouts:
         with self.lock:self.save()
         self.owner.close()
         print(json.dumps({'event':'recordings_saved','directory':str(self.directory),'pending':self.pending(),
+                          'skipped_cancelled':len(skipped),
                           'failed':sum(e['state']=='failed' for e in self.entries),
                           'error':self.last_error}),flush=True)

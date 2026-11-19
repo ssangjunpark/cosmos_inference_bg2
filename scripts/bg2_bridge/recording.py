@@ -79,6 +79,58 @@ class CameraVideo:
         finally:self.index.close()
 
 
+class CameraRecorder:
+    """Independent raw-camera recording; no model, prediction or robot control."""
+    def __init__(self, root, profile):
+        self.root = Path(root)
+        (self.root/'cameras').mkdir(exist_ok=False)
+        self.videos = {key: CameraVideo(self.root/'cameras', key) for key in ('head', 'wrist_left', 'wrist')}
+        self.error, self.closed, self.lock = None, False, RLock()
+        self.metadata = {'episode_id': self.root.name, 'episode_state': 'running',
+            'started_at_utc': datetime.now(timezone.utc).isoformat(),
+            'mode': 'record-cameras', 'physical_publishing': False,
+            'camera_recording': 'original compressed packets in timestamped Matroska; no frame resampling',
+            'camera_topics': {key: spec['topic'] for key, spec in profile['cameras'].items()}}
+        write_json(self.root/'run.json', self.metadata)
+
+    def check(self):
+        if self.error is not None:
+            raise RecordingError(self.error)
+
+    def camera(self, key, source, receipt, payload):
+        with self.lock:
+            if self.closed:
+                return
+            self.check()
+            try:
+                self.videos[key].write(source, receipt, payload)
+            except Exception as error:
+                self.error = 'Camera recording failed: ' + str(error)
+                raise RecordingError(self.error) from error
+
+    def cancel_collection(self):
+        pass  # There are no prediction artifacts to collect.
+
+    def close(self):
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            errors = []
+            for video in self.videos.values():
+                try:
+                    video.close()
+                except Exception as error:
+                    errors.append(str(error))
+            write_json(self.root/'recording_summary.json',
+                {'frames': {key: video.count for key, video in self.videos.items()},
+                 'error': self.error, 'close_errors': errors})
+            self.metadata.update(episode_state='ended', ended_at_utc=datetime.now(timezone.utc).isoformat())
+            atomic_json(self.root/'run.json', self.metadata)
+            if errors:
+                raise RecordingError('; '.join(errors))
+
+
 class RunRecorder:
     def __init__(self,root,mode,*,health=None,artifact_client=None,recording_wait=30):
         self.root,self.mode=Path(root),mode
@@ -96,6 +148,7 @@ class RunRecorder:
                    'started_at_utc':datetime.now(timezone.utc).isoformat(),'instruction':None,
                    'mode':mode,'physical_publishing':mode=='execute',
                    'policy_mode':health.get('mode','policy'),'imagined_future_rollout':health.get('mode')=='wam',
+                   'model_id':health.get('model_id'),'checkpoint':health.get('checkpoint'),
                    'camera_recording':'original compressed packets in timestamped Matroska; no frame resampling',
                    'model_visual_location':'imagined/' if self.rollouts else 'PRO 6000 server output; linked by epoch/request_id'}
         write_json(self.root/'run.json',self.metadata)
@@ -131,6 +184,12 @@ class RunRecorder:
 
     def request(self,epoch,request_id,source_time_ns):
         if self.rollouts is not None:self.rollouts.register(epoch,request_id,source_time_ns)
+
+    def request_not_generated(self,request_id,reason,proof):
+        if self.rollouts is not None:self.rollouts.request_not_generated(request_id,reason,proof)
+
+    def confirm_inference_barrier(self,result):
+        if self.rollouts is not None:self.rollouts.confirm_inference_barrier(result)
 
     def cancel_collection(self):
         if self.rollouts is not None:self.rollouts.cancel()

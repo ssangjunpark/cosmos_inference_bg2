@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "gpu": "0",
+  "minimum_free_vram_gib": 26,
+  "models": [
+    {
+      "config": "deploy/5090/yellowstick_v1.json",
+      "port": 18008,
+      "container_name": "cosmos-bg2-wam-edge-v1-server",
+      "output": "outputs/server-wam-edge-v1"
+    },
+    {
+      "config": "deploy/5090/yellowstick_v2.json",
+      "port": 18009,
+      "container_name": "cosmos-bg2-wam-edge-v2-server",
+      "output": "outputs/server-wam-edge-v2"
+    }
+  ]
+}

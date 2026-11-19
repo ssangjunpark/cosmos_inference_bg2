@@ -1,4 +1,4 @@
-"""Timestamp-aligned three-camera observations with the original PIL pixel transforms."""
+"""Timestamp-aligned three-camera observations with profile-selected PIL crops."""
 from collections import deque
 from io import BytesIO
 from threading import RLock
@@ -9,7 +9,8 @@ from PIL import Image, ImageOps
 from bg2_inference import FORMAT, JOINT_NAMES
 from .core import BridgeError, require, validate_profile
 
-# Verified training/cosmos_futurejoint/tools/prepare_threeview.py contract.
+# Fixed model input sizes; the training crop is supplied by each camera profile.
+# The legacy crops remain here for consumers of the reference camera contract.
 CAMERAS = {"head": ((128, 0, 672, 376), (512, 384)),
            "wrist": ((0, 184, 240, 424), (256, 256)),
            "wrist_left": ((0, 184, 240, 424), (256, 256))}
@@ -17,8 +18,12 @@ CAMERAS = {"head": ((128, 0, 672, 376), (512, 384)),
 
 def decode_view(payload, key, spec):
     require(0 < len(payload) <= 16 * 1024 * 1024, "Invalid compressed image size")
-    crop, size = CAMERAS[key]
-    require(tuple(spec["crop_xyxy"]) == crop and tuple(spec["output_wh"]) == size, "Camera crop/resize differs from training")
+    _, size = CAMERAS[key]
+    crop = spec.get("crop_xyxy")
+    require(isinstance(crop, (list, tuple)) and len(crop) == 4 and
+            all(type(value) is int for value in crop) and
+            0 <= crop[0] < crop[2] and 0 <= crop[1] < crop[3], "Invalid camera crop")
+    require(spec.get("output_wh") == list(size), "Camera output size differs from model input")
     rotation = spec.get("live_to_training_rotation_deg")
     require(rotation in (0, 90, 180, 270) and spec.get("raw_dimensions_verified") is True, f"{key}: camera transform is unverified")
     with Image.open(BytesIO(payload)) as source:

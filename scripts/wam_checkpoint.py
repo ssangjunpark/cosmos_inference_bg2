@@ -33,9 +33,12 @@ def validate_experiment(path, contract):
     return experiment
 
 
-def validate_checkpoint(checkpoint, variant=None, step=20000, hashes=False):
+def validate_checkpoint(checkpoint, variant=None, step=20000, hashes=False, *, model_dir=None):
     """Never creates receipts or edits the supplied checkpoint directory."""
     checkpoint = Path(checkpoint).resolve(strict=True)
+    weights = (Path(model_dir) if model_dir is not None else checkpoint / "model").resolve(strict=True)
+    if model_dir is None:
+        weights.relative_to(checkpoint)
     ready = json.loads((checkpoint / "READY.json").read_text())
     transfer = json.loads((checkpoint / "TRANSFER_VERIFIED.json").read_text())
     manifest = json.loads((checkpoint / "VERIFIED.json").read_text())
@@ -64,17 +67,17 @@ def validate_checkpoint(checkpoint, variant=None, step=20000, hashes=False):
         if name in listed:
             raise ValueError("Duplicate WAM manifest entry")
         listed.add(name)
-        source = (checkpoint / relative).resolve(strict=True)
-        source.relative_to(checkpoint)
+        source = weights.joinpath(*relative.parts[1:]).resolve(strict=True)
+        source.relative_to(weights)
         if not source.is_file() or source.stat().st_size != entry["bytes"]:
             raise ValueError(f"Incomplete WAM checkpoint: {relative}")
         # Unused distributed ranks legitimately have zero-byte shards.
         if hashes and file_hash(source) != entry["sha256"]:
             raise ValueError(f"WAM checksum mismatch: {relative}")
-    actual = {"model/.metadata"} | {p.relative_to(checkpoint).as_posix() for p in (checkpoint / "model").glob("*.distcp")}
-    if listed != actual or not (checkpoint / "model/.metadata").is_file():
+    actual = {"model/.metadata"} | {"model/" + p.name for p in weights.glob("*.distcp")}
+    if listed != actual or not (weights / ".metadata").is_file():
         raise ValueError("WAM shard set differs from VERIFIED.json")
-    if not any(p.stat().st_size > 0 for p in (checkpoint / "model").glob("*.distcp")):
+    if not any(p.stat().st_size > 0 for p in weights.glob("*.distcp")):
         raise ValueError("WAM checkpoint has no weight data")
     if not (checkpoint / "vision_contract.py").is_file():
         raise ValueError("Missing exported WAM vision/prompt formatter")
@@ -92,9 +95,9 @@ def validate_checkpoint(checkpoint, variant=None, step=20000, hashes=False):
             "transfer": transfer, "full_checksums_checked": bool(hashes)}
 
 
-def published_wam_checkpoint(root, variant, step=20000, hashes=False):
+def published_wam_checkpoint(root, variant, step=20000, hashes=False, *, model_dir=None):
     root = Path(root).resolve(strict=True)
     checkpoint = (root / variant / f"{step:06d}").resolve(strict=True)
     checkpoint.relative_to(root)
-    validate_checkpoint(checkpoint, variant, step, hashes)
+    validate_checkpoint(checkpoint, variant, step, hashes, model_dir=model_dir)
     return checkpoint

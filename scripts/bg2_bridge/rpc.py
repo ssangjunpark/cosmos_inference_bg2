@@ -21,6 +21,18 @@ MAX_REPLY = 128 * 1024
 FIELDS = {'head', 'wrist', 'wrist_left', 'joint_position', 'joint_names', 'source_time_ns', 'instruction', 'format'}
 
 
+class InferenceBusy(BridgeError):
+    """The server explicitly refused a request before starting prediction."""
+
+
+class InferenceNotSubmitted(BridgeError):
+    """Cancellation happened before the HTTP request was sent."""
+
+
+class RecordingNotAvailable(BridgeError):
+    """The recording API returned HTTP 404 for a saved request."""
+
+
 def identifier(value):
     require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{32}', value), 'Expected a 32-character hexadecimal identifier')
     return value
@@ -76,7 +88,8 @@ class InferenceClient:
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
         try:
             with self.active_lock:
-                require(not self.cancelled.is_set(),'Inference request cancelled')
+                if self.cancelled.is_set():
+                    raise InferenceNotSubmitted('Inference request cancelled before submission')
                 self.active, self.active_socket = connection, None
             headers = dict(extra or {})
             if body is not None:
@@ -94,6 +107,11 @@ class InferenceClient:
             payload = response.read(MAX_REPLY + 1)
             require(len(payload) <= MAX_REPLY, 'Oversized inference response')
             data = json.loads(payload)
+            if response.status == 503 and isinstance(data, dict) and data.get('ok') is False:
+                raise InferenceBusy(data.get('error', 'Model is busy'))
+            if response.status == 404 and path.startswith(('/artifacts/', '/artifact-lookup/')):
+                raise RecordingNotAvailable(data.get('error', 'Recording not available') if isinstance(data, dict)
+                                            else 'Recording not available')
             require(response.status == 200 and isinstance(data, dict) and data.get('ok') is True,
                     data.get('error', f'Inference HTTP {response.status}') if isinstance(data, dict) else 'Invalid inference reply')
             return data

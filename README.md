@@ -17,6 +17,17 @@ To run Edge WAM and the gateway together on `3sp5090`, use the
 [5090 local inference runbook](docs/5090_local_inference.md). The full Git checkout
 is at `~/Documents/cosmos_inference_bg2` on 5090; only checkpoints stay under
 `/mnt/sata1/cosmos3/checkpoints`. Both processes connect over localhost.
+That runbook also includes separate Yellowstick v1/v2 model and gateway commands;
+their weights stay under `/mnt/sata1/lg_wm/ckpt/cosmos3_yellowstick_20261114`.
+For one command that keeps **both yellowstick policies resident on the 5090**, with
+policy selection in terminal 4 and an independent continuous camera recorder in
+terminal 5, use the [dual-model guide](docs/5090_dual_yellowstick.md).
+The optional [post-pause diagnostic](docs/5090_pause_diagnostic.md) adds one
+fresh forecast after Ctrl+C, saves `*_extra.mp4` previews and actions, and never
+submits that extra chunk to the robot. It is off by default.
+The [v2 → v1 sequence guide](docs/5090_v2_then_v1.md) provides one command to
+start continuous recording, finish v2 on Enter, run v1 after cleanup, then finish
+v1 and all recordings on a second Enter. Models and robot bringup stay separate.
 
 The current control contract is **hold → fresh observation → infer → execute all 16 points
 → hold the last command → repeat**. See the [synchronous execution agreement](docs/synchronous_execution_20261104.md).
@@ -56,6 +67,11 @@ cd cosmos_inference_bg2
 
 For an existing checkout, run `git submodule update --init --recursive`.
 Model weights, downloaded assets, caches, recorded inputs, and generated outputs are local-only.
+
+## Render saved comparisons
+
+The [render guide](render/README.md) shows how to recreate the Yellowstick exports
+from a completed recording and where to change their layout and encoding.
 
 ## Build and check
 
