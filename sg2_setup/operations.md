@@ -15,10 +15,16 @@ sg2_status() {
 
 sg2_preview_control() {
   local request
+  case "${1:-}" in
+    pause|resume) ;;
+    *) echo "Usage: sg2_preview_control pause|resume" >&2; return 1 ;;
+  esac
   request=$(sg2_status | /usr/bin/python3 -c '
 import json, sys, yaml
 command = sys.argv[1]
-sample = next(doc for doc in yaml.safe_load_all(sys.stdin) if doc)
+sample = next((doc for doc in yaml.safe_load_all(sys.stdin) if doc), None)
+if sample is None:
+    sys.exit("No SG2 status received. Check the companion, ROS domain, middleware and discovery settings.")
 s = json.loads(sample["data"])
 phases = {"pause": ("ready", "holding"), "resume": ("paused",)}
 if (s.get("schema") != "cosmos_sg2_status_v3" or s.get("mode") != "preview"
@@ -110,7 +116,7 @@ cp -n config/profile.reference.json config/profile.site.json
 
 For an intentional hardware session, run the validated invocation **without `--check`**. From a second terminal verify `mode="execute"`, `controllers_ready=true`, a current epoch, and a ready or holding phase. Current-pose startup captures measured positions. The supplied initial-position YAML provides the arm groups and settling tolerances.
 
-**Future 5090 model adapter.** The repository implements the **robot receiver**. The 5090 sender for the bimanual training checkpoint is pending the training contract. It must map the learned action representation to absolute radians, supply all 16 names and matching columns, and send 16 future points at 50 ms intervals. Use the robot-stamped fresh observation time after `ready_since_ns` and the latest `cycle` and `epoch`. The previous chunk completes when the robot reports its `last_completed_request_id` and `needs_chunk=true`. The BG2 inference commands in the root README target a different profile and wire schema. The complete message fields are in the [SG2 protocol](../deploy/sg2/README.md#5090-wire-interface).
+**Future 5090 model adapter.** The repository implements the **robot receiver**. The 5090 sender for the bimanual training checkpoint is pending the training contract. Request the run configuration, tensor layouts, preprocessing and reference prediction using the [training handoff checklist](training_handoff.md). It must map the learned action representation to absolute radians, supply all 16 names and matching columns, and send 16 future points at 50 ms intervals. Use the robot-stamped fresh observation time after `ready_since_ns` and the latest `cycle` and `epoch`. The previous chunk completes when the robot reports its `last_completed_request_id` and `needs_chunk=true`. The BG2 inference commands in the root README target a different profile and wire schema. The complete message fields are in the [SG2 protocol](../deploy/sg2/README.md#5090-wire-interface).
 
 ## Stop, restart, update, or roll back
 
@@ -128,7 +134,7 @@ For an intentional hardware session, run the validated invocation **without `--c
 | `Use a new output directory` or `Bundle file changed` | Build to a fresh path. Compare the verified source commit at both ends and copy the complete directory again if it differs. Keep deployment edits in a separate profile. |
 | SSH transfer succeeded, but the container cannot find `cosmos_ffw` | Check `pwd` and `ls MANIFEST.json cosmos_ffw` inside the ROS shell. Repeat the host-to-container copy if the container was recreated. Run the module from the directory containing `cosmos_ffw/`. |
 | `ModuleNotFoundError` for `rclpy` or `controller_manager_msgs` | Use the follower's sourced Jazzy environment and `/usr/bin/python3`. Check whether the ROS interface package is installed **in that environment**. NumPy and PyYAML are required by the offline check too. |
-| Status works on SG2 but times out on the 5090 | Compare the actual domain and RMW, DDS discovery settings or Zenoh router address, and network reachability. A container-local loopback address points to a different machine from the 5090. Recheck the 5090 CLI daemon after changing middleware. |
+| Status works on SG2 but times out on the 5090 | Compare the actual domain and RMW. For DDS inspect `ROS_AUTOMATIC_DISCOVERY_RANGE` and `ROS_STATIC_PEERS` on both endpoints. For Zenoh check the router address. A container-local loopback address points to a different machine from the 5090. Recheck the 5090 CLI daemon after changing middleware. |
 | `settling` persists, or status says stale feedback | Inspect current `/joint_states` in the follower's ROS shell. Both arms need fresh, aligned position and velocity samples. Current-pose startup needs a stable 0.5 s interval. The companion rejects feedback older than 100 ms or more than 25 ms in the future relative to the robot clock. |
 | `ready` in preview but `controllers_ready=false` | Confirm `/controller_manager/list_controllers` is visible and the two arm controllers are active with the required interfaces. Preview readiness alone does not establish controller ownership. |
 | `Competing command publisher` or `No controller subscriber` | Inspect **both** configured topics with `ros2 topic info ... --verbose`. Check for teleop publishers, alternate remaps, namespaced controllers, and duplicate companions. |

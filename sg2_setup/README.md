@@ -63,8 +63,7 @@ Expect `sg2` as the branch. The root commit names the submodule revision. Leave 
 **5090 host, from the checkout.**
 
 ```bash
-/usr/bin/python3 -B scripts/package_ffw.py --robot sg2
-(
+/usr/bin/python3 -B scripts/package_ffw.py --robot sg2 && (
   cd transfer/sg2 &&
   /usr/bin/python3 -B verify_bundle.py &&
   /usr/bin/python3 -B -m cosmos_ffw.node \
@@ -96,14 +95,22 @@ The packager expects a new output directory. On a repeat installation you can re
 cd ~/Documents/cosmos_inference_sg2
 SG2_HOST='YOUR_ROBOT_LOGIN@YOUR_SG2_HOST'
 SG2_BUNDLE="$PWD/transfer/sg2"
-SG2_RELEASE=$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_commit"][:12])' "$SG2_BUNDLE/MANIFEST.json")
-SG2_DEST="cosmos-sg2/releases/$SG2_RELEASE"
-ssh "$SG2_HOST" "mkdir -p '$SG2_DEST'"
-rsync -av "$SG2_BUNDLE/" "$SG2_HOST:$SG2_DEST/"
+SG2_RELEASE=$(/usr/bin/python3 - "$SG2_BUNDLE/MANIFEST.json" "$(git rev-parse HEAD)" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    manifest = json.load(f)
+if manifest["robot"] != "sg2" or manifest["source_dirty"] or manifest["source_commit"] != sys.argv[2]:
+    sys.exit("Rebuild the SG2 bundle from the intended clean checkout before copying.")
+print(manifest["source_commit"][:12])
+PY
+) &&
+SG2_DEST="cosmos-sg2/releases/$SG2_RELEASE" &&
+ssh "$SG2_HOST" "mkdir -p '$SG2_DEST'" &&
+rsync -av "$SG2_BUNDLE/" "$SG2_HOST:$SG2_DEST/" &&
 ssh "$SG2_HOST" "cd '$SG2_DEST' && python3 -B verify_bundle.py && pwd"
 ```
 
-The trailing slash copies the folder's **contents**. The last command prints a release directory with `MANIFEST.json` at its root. Compare the source commit with step 2. If using `scp`, substitute `scp -r "$SG2_BUNDLE/." "$SG2_HOST:$SG2_DEST/"` for the rsync command, then run the same remote verification.
+The trailing slash copies the folder's **contents**. The last command prints a release directory with `MANIFEST.json` at its root. Compare the source commit with step 2. If using `scp`, substitute `scp -r "$SG2_BUNDLE/." "$SG2_HOST:$SG2_DEST/"` for the `rsync -av ...` command, retaining the trailing `&&` and remote verification. Continue to step 4 only after verification succeeds.
 
 ## 4. Open the release in the SG2 ROS environment
 
@@ -147,15 +154,16 @@ A successful import prints nothing. If an import fails, check that this is the f
 ```bash
 /usr/bin/python3 -c 'from rclpy.utilities import get_rmw_implementation_identifier as rmw; print(rmw())'
 echo "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}"
+echo "ROS_AUTOMATIC_DISCOVERY_RANGE=${ROS_AUTOMATIC_DISCOVERY_RANGE:-<unset>} ROS_STATIC_PEERS=${ROS_STATIC_PEERS:-<unset>}"
 ros2 control list_controllers --verbose
 ros2 topic info /joint_states --verbose
-ros2 topic echo /joint_states sensor_msgs/msg/JointState --qos-reliability best_effort --full-length --once
+timeout 12s ros2 topic echo /joint_states sensor_msgs/msg/JointState --qos-reliability best_effort --full-length --once
 for side in left right; do
   ros2 topic info "/leader/joint_trajectory_command_broadcaster_${side}/joint_trajectory" --verbose
 done
 ```
 
-Record the effective middleware and domain for step 7. The expected controllers are `arm_l_controller` and `arm_r_controller`, both active. Each claims eight `/position` interfaces. Feedback must have a current stamp, unique names, and aligned name, position, and velocity arrays. Check for seven arm joints and `gripper_l_joint1` or `gripper_r_joint1` on each side. Wheel, lift and head feedback can coexist in the message.
+If `ros2 control` is unavailable, use `timeout 12s ros2 service call /controller_manager/list_controllers controller_manager_msgs/srv/ListControllers '{}'` in the same shell to see controller states and claimed interfaces. Record the effective middleware, domain and discovery settings for step 7. If the installation uses DDS subnet discovery for the 5090 link and this shell reports `LOCALHOST`, set `export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET` here before starting the companion in step 6. The expected controllers are `arm_l_controller` and `arm_r_controller`, both active. Each claims eight `/position` interfaces. Feedback must have a current stamp, unique names, and aligned name, position, and velocity arrays. Check for seven arm joints and `gripper_l_joint1` or `gripper_r_joint1` on each side. Wheel, lift and head feedback can coexist in the message.
 
 The July launch remaps each controller to its `/leader/...` topic. In the verbose topic output, look for the corresponding controller **subscriber** in namespace `/`. If your installation uses the native JointTrajectoryController (JTC) input, check `/arm_l_controller/joint_trajectory` and `/arm_r_controller/joint_trajectory`. Record the actual topic for each arm. See [profile selection and software revisions](operations.md#match-the-profile-to-the-installed-robot) if they differ.
 
@@ -174,7 +182,7 @@ In a **second SG2 ROS shell** with the same environment, inspect the node and re
 
 ```bash
 ros2 node info /cosmos_ffw_companion
-ros2 topic echo /cosmos/sg2/status std_msgs/msg/String --full-length --once
+timeout 12s ros2 topic echo /cosmos/sg2/status std_msgs/msg/String --full-length --once
 ```
 
 Expect JSON in the message's `data` field. For a settled, newly started preview with no commands, look for `schema="cosmos_sg2_status_v3"`, `mode="preview"`, `phase="ready"`, `needs_chunk=true`, `physical_publishing=false`, and `command_messages=0`. A brief `settling` phase is normal. `controllers_ready` is a separate observation of the controller-manager service. Preview can report `ready` while that field is false.
@@ -190,7 +198,7 @@ read -rp 'RMW implementation observed on SG2: ' RMW_IMPLEMENTATION
 export ROS_DOMAIN_ID RMW_IMPLEMENTATION
 ```
 
-- **DDS** (`rmw_fastrtps_cpp` or `rmw_cyclonedds_cpp`). Use the same discovery configuration as the SG2 network. With normal subnet discovery, both hosts need a route on the robot LAN and working multicast. If the installation uses static peers, a discovery server, or a DDS profile, apply its corresponding **5090-side** settings. [Jazzy discovery settings](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Improved-Dynamic-Discovery.html)
+- **DDS** (`rmw_fastrtps_cpp` or `rmw_cyclonedds_cpp`). Use the same discovery configuration as the SG2 network. With subnet discovery, both hosts need a route on the robot LAN and working multicast. A DDS process using `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` with no configured peers discovers only its own host. For a multicast installation, set `export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET` in the companion and 5090 shells before starting their ROS processes. If the installation uses static peers, a discovery server, or a DDS profile, apply its corresponding **5090-side** settings. [Jazzy discovery settings](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Improved-Dynamic-Discovery.html)
 - **Zenoh** (`rmw_zenoh_cpp`). Use the existing router endpoint reachable from the 5090. If the site uses a custom session config, use its 5090 client config. For a plain TCP router, the following sets its endpoint in this shell. Use the real router address and port. [Jazzy Zenoh configuration](https://github.com/ros2/rmw_zenoh/blob/jazzy/README.md#configuration)
 
 ```bash
@@ -204,11 +212,13 @@ After changing the 5090's CLI middleware, refresh its local CLI daemon. Then che
 ```bash
 ros2 daemon stop
 ros2 topic info /cosmos/sg2/status --verbose
-ros2 topic echo /cosmos/sg2/status std_msgs/msg/String --full-length --once
+timeout 12s ros2 topic echo /cosmos/sg2/status std_msgs/msg/String --full-length --once
 ```
 
 Confirm the **single SG2 companion** is the status publisher and that its `epoch` matches the robot-side preview. SSH success alone only proves the file-transfer path. Finish with the [preview pause/resume round trip](operations.md#prove-both-directions-in-preview). A successful round trip leaves the companion in `holding` with `needs_chunk=true` and zero actuator messages.
 
-This procedure was rehearsed from a fresh Git-bundle clone with the public pinned submodule, a staged rsync copy, and a network-isolated Jazzy container with simulated arm controllers. The preview test reached `ready → paused → holding` with zero actuator messages. The SSH login, live controller graph, physical fixed-base setup, and inter-machine discovery must be established on the actual installation.
+This procedure was rehearsed from a fresh Git-bundle clone with the pinned submodule. Both rsync over SSH and the scp alternative produced verified releases on an empty simulated robot host. We copied a release into a separate Jazzy follower container and exercised preview from a workstation container over DDS. The companion reported `ready → paused → holding`, then `ready` with a fresh epoch after restart. The simulated arm controllers received zero trajectories. The actual SG2 login, controller graph, chassis setup and robot LAN still need an on-site check.
+
+The [SG2 training handoff checklist](training_handoff.md) lists what the 5090 adapter needs from the training run.
 
 Stop preview with **Ctrl+C in the companion terminal**. The [operations guide](operations.md) also covers restarting, troubleshooting, rollback, and the later handoff to a trained 5090 policy.
