@@ -1,0 +1,12 @@
+{
+  "primary_id": "sg2-primary", "fallback_id": "sg2-alternative",
+  "primary_url": "http://127.0.0.1:8090", "fallback_url": "http://127.0.0.1:8091",
+  "jepa_url": "http://127.0.0.1:8092", "timeout_seconds": 30,
+  "threshold": 2.0,
+  "frame_interval_ns": 50000000,
+  "joint_names": [], "units": [],
+  "models": [
+    {"checkpoint": "~/checkpoints/sg2-primary", "command": []},
+    {"checkpoint": "~/checkpoints/sg2-alternative", "command": []}
+  ]
+}

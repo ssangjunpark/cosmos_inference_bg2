@@ -256,3 +256,9 @@ the earlier async trajectory gate; that is not validation of this revised execut
 target and was correctly rejected against reference limits; outputs are never silently
 clipped. Live camera transforms, installed hardware compatibility, and sustained network/robot
 behavior remain unverified. The installed 5090 copy predates this synchronous revision until updated. FFW deployment remains pending.
+
+### SG2 / JEPA local replay
+
+See [SG2 / JEPA local integration](docs/sg2_jepa_local.md) for checkpoint paths,
+service contracts, raw-loss selection and a self-contained offline UI demo.
+SG2 hardware collection and motion commissioning remain a separate step.

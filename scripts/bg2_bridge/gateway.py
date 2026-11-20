@@ -47,8 +47,9 @@ class StatusCache:
 
 
 class Gateway:
-    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', recorder=None, send_control=None):
+    def __init__(self, observations, status, client, send_chunk, instruction, mode='preview', recorder=None, send_control=None, selection_gate=None):
         self.observations, self.status, self.client = observations, status, client
+        self.selection_gate = selection_gate
         self.send_chunk, self.instruction, self.mode = send_chunk, instruction, mode
         self.recorder = recorder
         self.send_control, self.resume_sent_epoch, self.next_resume_retry_ns = send_control, None, 0
@@ -111,7 +112,7 @@ class Gateway:
             if self.recorder is not None and hasattr(self.recorder,'request'):
                 self.recorder.request(epoch,request_id,source)
             # Blocking inference: FFW is holding, and no next request is prefetched.
-            result = self.client.predict(observation, epoch, request_id)
+            result = (self.selection_gate or self.client).predict(observation, epoch, request_id)
             if self.recorder is not None:self.recorder.prediction(result)
             elapsed = max(1, time.monotonic_ns() - started)
             latest = self.status.get(now_ns + time.monotonic_ns() - entered_ns)
@@ -142,7 +143,7 @@ class Gateway:
 
     def close(self):
         self.closed = True
-        cancel=getattr(self.client,'cancel',None)
+        cancel=getattr(self.selection_gate or self.client,'cancel',None)
         if cancel is not None:cancel()
 
 
