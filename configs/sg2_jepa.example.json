@@ -1,12 +1,116 @@
 {
-  "primary_id": "sg2-primary", "fallback_id": "sg2-alternative",
-  "primary_url": "http://127.0.0.1:8090", "fallback_url": "http://127.0.0.1:8091",
-  "jepa_url": "http://127.0.0.1:8092", "timeout_seconds": 30,
+  "primary_id": "CM1",
+  "fallback_id": "CM2",
+  "primary_url": "http://127.0.0.1:8090",
+  "fallback_url": "http://127.0.0.1:8091",
+  "jepa_url": "http://127.0.0.1:8092",
+  "timeout_seconds": 30,
   "threshold": 2.0,
   "frame_interval_ns": 50000000,
-  "joint_names": [], "units": [],
+  "joint_names": [
+    "arm_l_joint1",
+    "arm_l_joint2",
+    "arm_l_joint3",
+    "arm_l_joint4",
+    "arm_l_joint5",
+    "arm_l_joint6",
+    "arm_l_joint7",
+    "gripper_l_joint1",
+    "arm_r_joint1",
+    "arm_r_joint2",
+    "arm_r_joint3",
+    "arm_r_joint4",
+    "arm_r_joint5",
+    "arm_r_joint6",
+    "arm_r_joint7",
+    "gripper_r_joint1"
+  ],
+  "units": [
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad",
+    "rad"
+  ],
   "models": [
-    {"checkpoint": "~/checkpoints/sg2-primary", "command": []},
-    {"checkpoint": "~/checkpoints/sg2-alternative", "command": []}
-  ]
+    {
+      "model_id": "CM1",
+      "checkpoint": "~/checkpoints/sg2-primary",
+      "port": 8090
+    },
+    {
+      "model_id": "CM2",
+      "checkpoint": "~/checkpoints/sg2-alternative",
+      "port": 8091
+    }
+  ],
+  "selection_mode": "parallel_latched",
+  "primary_variant": "pnp2_normal",
+  "fallback_variant": "pnp2_abnormal",
+  "history_frames": 2,
+  "video_view": "head",
+  "video_size": [
+    256,
+    192
+  ],
+  "model_runtime": {
+    "tokenizer": "~/checkpoints/tokenizer",
+    "vae": "~/checkpoints/Wan2.2_VAE.pth",
+    "calibration": "~/checkpoints/calibration.json",
+    "sampling": {
+      "steps": null,
+      "guidance": null,
+      "shift": null,
+      "seed": 0
+    }
+  },
+  "jepa": {
+    "checkpoint": "~/checkpoints/vjepa2_1_vitg_384.pt",
+    "repo_root": "~/projects/vjepa2",
+    "size": "vitg",
+    "model_family": "vjepa2_1",
+    "device": "cuda",
+    "port": 8092,
+    "preprocess": {
+      "temporal_stride": 1,
+      "max_frames": 64,
+      "spatial_mode": "center_crop",
+      "crop_size": 384,
+      "short_side": 438,
+      "source_fps": 20
+    },
+    "project_root": "../../project-lg-wm",
+    "python": "../../project-lg-wm/.venv/bin/python"
+  },
+  "launcher": {
+    "cosmos_backend": "docker",
+    "cosmos_image": "cosmos-sg2-wam:local",
+    "cosmos_python": "python3",
+    "gpu": "0",
+    "startup_timeout_seconds": 600
+  },
+  "gateway": {
+    "mode": "preview",
+    "router": null,
+    "port": 7447,
+    "domain": null,
+    "head_topic": null,
+    "left_topic": null,
+    "right_topic": null,
+    "robot_profile": "../profiles/robotis_sg2_rev1.reference.json",
+    "selection_output": "../outputs/sg2/jepa",
+    "chunks": 0,
+    "timeout_seconds": 30
+  }
 }

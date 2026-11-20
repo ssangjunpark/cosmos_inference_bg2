@@ -26,3 +26,6 @@ checkpoints/
 
 # Local SG2 training handoff supplied separately from the inference adapter
 /handoff/sg2_handoff_20261119/
+
+# Machine-specific unified SG2 model/JEPA settings
+/configs/*.local.json

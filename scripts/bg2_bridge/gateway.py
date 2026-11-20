@@ -87,6 +87,8 @@ class Gateway:
                 return {'event':'waiting','reason':'Waiting for FFW chunk completion acknowledgement'}
             if current.get('last_completed_request_id') != request_id:
                 return {'event':'waiting','reason':'FFW completion does not match the submitted chunk'}
+            if self.selection_gate is not None and hasattr(self.selection_gate, 'execution_event'):
+                self.selection_gate.execution_event('completed')
             self.awaiting = None
         if now_ns < self.next_retry_ns:
             return None
@@ -113,6 +115,8 @@ class Gateway:
                 self.recorder.request(epoch,request_id,source)
             # Blocking inference: FFW is holding, and no next request is prefetched.
             result = (self.selection_gate or self.client).predict(observation, epoch, request_id)
+            if self.selection_gate is not None:
+                result = {key: value for key, value in result.items() if key != 'future'}
             if self.recorder is not None:self.recorder.prediction(result)
             elapsed = max(1, time.monotonic_ns() - started)
             latest = self.status.get(now_ns + time.monotonic_ns() - entered_ns)
@@ -120,6 +124,8 @@ class Gateway:
                     latest[0]['cycle'] == cycle, 'FFW session/readiness changed while inference was running')
             result = {**result, 'execution_contract':EXECUTION_CONTRACT, 'cycle':cycle}
             self.send_chunk(result)
+            if self.selection_gate is not None and hasattr(self.selection_gate, 'execution_event'):
+                self.selection_gate.execution_event('submitted')
             self.awaiting = cycle, request_id
             self.forwarded += 1
             return {'event':'forwarded','request_id':request_id,'epoch':epoch,'cycle':cycle,
@@ -135,6 +141,8 @@ class Gateway:
             self.next_retry_ns = now_ns + max(1,time.monotonic_ns()-entered_ns) + 100_000_000
             return {'event':'discarded','reason':str(error),'request_id':request_id,'prediction_generated':False}
         except Exception as error:
+            if self.selection_gate is not None and hasattr(self.selection_gate, 'execution_event'):
+                self.selection_gate.execution_event('discarded', str(error))
             self.failed += 1
             self.next_retry_ns = now_ns + max(1, time.monotonic_ns() - entered_ns) + 100_000_000
             return {'event':'discarded','reason':str(error)}

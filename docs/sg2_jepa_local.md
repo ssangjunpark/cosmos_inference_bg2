@@ -1,3 +1,5 @@
+> For the current SG2 parallel-inference, persistent-CM2 mode, use [the live dual-model guide](../sg2_setup/jepa.md). This page describes legacy local replay.
+
 # SG2 Cosmos / JEPA local integration
 
 This local integration implements pre-execution model selection and replay. It
@@ -20,7 +22,7 @@ selection file. Use separate output directories to preserve previous results.
 
 ## Real recorded observations
 
-Copy `configs/sg2_jepa.example.json` to a local configuration. The configured
+For legacy sequential JSON replay, create a local configuration without `selection_mode`, using the fields described below. The current `configs/sg2_jepa.example.json` selects the new SG2 binary parallel/latched mode. The configured
 raw-loss **threshold is 2.0**, as selected by the user; it has not been calibrated.
 Fill **joint_names** and **units** explicitly; the example does not invent SG2
 coordinates. Set the observation and prediction

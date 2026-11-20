@@ -259,6 +259,9 @@ behavior remain unverified. The installed 5090 copy predates this synchronous re
 
 ### SG2 / JEPA local replay
 
-See [SG2 / JEPA local integration](docs/sg2_jepa_local.md) for checkpoint paths,
-service contracts, raw-loss selection and a self-contained offline UI demo.
-SG2 hardware collection and motion commissioning remain a separate step.
+Use the [SG2 CM1/CM2 + JEPA startup guide](sg2_setup/jepa.md) for resident model
+services, parallel inference, threshold 2.0 and persistent CM2 selection on one
+gateway. The [offline UI demo](docs/sg2_jepa_local.md) remains available.
+Real-weight GPU measurements and physical commissioning remain to be verified.
+
+Use [one config and run_jepa.sh](sg2_setup/jepa_config.md) to select both Cosmos checkpoints, the JEPA checkpoint and threshold, then launch services/gateway.

@@ -73,15 +73,30 @@ def offline(args):
 
 def run_live(args):
     profile = site_profile(args)
-    inputs = Observations(profile, joint_names=ARM_NAMES, observation_format=FORMAT)
+    gate = None
+    if getattr(args, 'jepa_config', None):
+        from bg2_bridge.sg2_dual import from_config
+        from bg2_bridge.sg2_history import HistoryObservations
+        from bg2_bridge.sg2_monitor import SelectionMonitor
+        config = read(args.jepa_config.expanduser())
+        monitor = SelectionMonitor(args.selection_output)
+        gate = from_config(config,event=monitor)
+        monitor.gate = gate
+        inputs = HistoryObservations(profile, joint_names=ARM_NAMES, observation_format=FORMAT,
+            history_frames=config['history_frames'], frame_interval_ns=config['frame_interval_ns'],
+            video_view=config['video_view'], video_size=config['video_size'],
+            history_required=lambda: not gate.fallback_active)
+    else:
+        inputs = Observations(profile, joint_names=ARM_NAMES, observation_format=FORMAT)
     status = StatusCache(schema="cosmos_sg2_status_v3")
     capture = args.command == "capture"
-    predictor = None if capture else Predictor(args)
+    predictor = gate if gate is not None else (None if capture else Predictor(args))
     instruction = settings(args.variant)["instruction"]
     transport = GatewayTransport(profile, inputs, status, inspect=capture, messages_dir=ROOT / "deploy/gateway/messages")
+    gateway = None
     try:
         if not capture:
-            gateway = Gateway(inputs, status, predictor, transport.send_chunk, instruction, mode=args.command)
+            gateway = Gateway(inputs, status, predictor, transport.send_chunk, instruction, mode=args.command, selection_gate=gate)
         deadline = time.monotonic() + args.timeout
         reason = "Waiting for SG2 sensor messages"
         while time.monotonic() < deadline:
@@ -102,12 +117,14 @@ def run_live(args):
                     require(state["phase"] not in ("fault", "stopped"), state.get("reason") or state["phase"])
                     if gateway.awaiting and state["epoch"] != gateway.epoch:
                         raise ValueError("SG2 session changed while awaiting chunk completion")
-                    if gateway.forwarded == args.chunks and gateway.awaiting:
+                    if args.chunks and gateway.forwarded == args.chunks and gateway.awaiting:
                         cycle, request_id = gateway.awaiting
                         if state["last_completed_request_id"] == request_id and state["cycle"] > cycle and state["needs_chunk"]:
+                            if gate is not None:
+                                gate.execution_event("completed")
                             print(json.dumps({"completed_chunks": gateway.forwarded, "last_completed_request_id": request_id}))
                             return
-                if gateway.forwarded < args.chunks:
+                if args.chunks == 0 or gateway.forwarded < args.chunks:
                     event = gateway.step(now)
                     if event and event["event"] == "discarded":
                         raise ValueError(event["reason"])
@@ -121,15 +138,20 @@ def run_live(args):
             time.sleep(.02)
         raise TimeoutError(transport.last_error or reason)
     finally:
+        if gateway is not None:
+            gateway.close()
         transport.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("check", "prepare", "capture", "predict", "preview", "execute"):
+    for name in ("check", "prepare", "capture", "predict", "preview", "execute", "jepa-preview", "jepa-execute"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--variant", choices=VARIANTS, required=True)
+        if name.startswith('jepa-'):
+            cmd.add_argument('--jepa-config',type=Path,required=True)
+            cmd.add_argument('--selection-output',type=Path,required=True)
         if name in ("check", "predict", "preview", "execute"):
             cmd.add_argument("--checkpoint", type=Path, required=name != "check")
         if name == "check":
@@ -150,16 +172,23 @@ def main():
             cmd.add_argument("--shift", type=float, required=True)
             cmd.add_argument("--guidance-interval", nargs=2, type=float)
             cmd.add_argument("--seed", type=int, default=0)
-        if name in ("preview", "execute", "capture"):
+        if name in ("preview", "execute", "capture", "jepa-preview", "jepa-execute"):
             for field in ("router", "head-topic", "left-topic", "right-topic"):
                 cmd.add_argument("--" + field, required=True)
             cmd.add_argument("--port", type=int, default=7447)
             cmd.add_argument("--domain", type=int, required=True)
             cmd.add_argument("--robot-profile", type=Path, default=ROOT / "profiles/robotis_sg2_rev1.reference.json")
             cmd.add_argument("--timeout", type=float, default=30, help="Seconds to wait for sensor data or a robot acknowledgement")
-        if name in ("preview", "execute"):
-            cmd.add_argument("--chunks", type=int, default=1)
+        if name in ("preview", "execute", "jepa-preview", "jepa-execute"):
+            cmd.add_argument("--chunks", type=int, default=1, help="Number of chunks; 0 continues until interrupted in JEPA mode")
     args = parser.parse_args()
+    if args.command.startswith('jepa-'):
+        args.command = args.command.removeprefix('jepa-')
+        require(args.chunks >= 0 and np.isfinite(args.timeout) and args.timeout > 0, 'Specify a nonnegative chunk count and positive timeout')
+        cfg = read(args.jepa_config.expanduser())
+        require(args.variant == cfg['primary_variant'], 'Variant must match the CM1 configuration')
+        run_live(args)
+        return
     if args.command == "check":
         spec = settings(args.variant)
         receipt = inspect_weights(args.checkpoint, spec) if args.checkpoint else None

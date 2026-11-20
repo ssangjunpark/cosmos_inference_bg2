@@ -87,3 +87,5 @@ bash sg2_setup/run_policy.sh preview "${model[@]}" "${link[@]}" --calibration /d
 For an intentional physical session, follow the [execute-mode commissioning procedure](operations.md#later-physical-execution). Select `execute` on both ends and pass `--robot-profile /data/profile.site.json` on the 5090 with the reviewed site profile. The reference profile supports preview. The November 19 handoff includes loader examples, camera preprocessing and model settings. It leaves checkpoint selection, sampling parameters, physical calibration and hardware rollout verification to commissioning.
 
 In the 5090 runtime, all four native batches matched the handoff's current-state tensor, prompt and token count. An isolated Zenoh test sent synthetic camera frames and joint feedback through the SDK, then ran two acknowledged chunks each for PNP1 and PNP2 with a stand-in model. The supplied golden examples contain measured targets. A trained SG2 prediction and a physical rollout still require a selected checkpoint and the actual installation.
+
+For concurrent CM1/CM2 inference with JEPA-triggered persistent switching, use the [dual-model startup guide](jepa.md).

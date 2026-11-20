@@ -245,6 +245,9 @@ class JepaGate:
 
 
 def from_config(config, event=None):
+    if config.get('selection_mode') == 'parallel_latched':
+        from .sg2_dual import from_config as dual_from_config
+        return dual_from_config(config,event)
     return JepaGate(
         JsonPolicy(
             config["primary_url"], config["timeout_seconds"], config["primary_id"]

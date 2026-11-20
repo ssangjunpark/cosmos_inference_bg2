@@ -154,6 +154,8 @@ def main():
     config = json.loads(Path(args.config).expanduser().read_text())
     if args.launch_models and args.fixture_primary:
         parser.error("Choose model launch or fixtures")
+    if args.launch_models and config.get("selection_mode") == "parallel_latched":
+        parser.error("Start resident SG2 services separately with serve_sg2_pair.py")
     processes = launch_models(config) if args.launch_models else []
     try:
         with np.load(
@@ -168,7 +170,12 @@ def main():
                 def score(self, *unused):
                     return args.fixture_loss
 
-            gate = JepaGate(
+            gate_type = JepaGate
+            if config.get("selection_mode") == "parallel_latched":
+                from .sg2_dual import ParallelLatchedGate
+
+                gate_type = ParallelLatchedGate
+            gate = gate_type(
                 FixturePolicy(args.fixture_primary, config["primary_id"]),
                 FixturePolicy(args.fixture_fallback, config["fallback_id"]),
                 Judge(),
