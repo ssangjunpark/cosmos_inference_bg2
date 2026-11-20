@@ -2,6 +2,8 @@
 
 The 5090 adapter needs to reconstruct the training inputs and translate each prediction into commands for the fixed-base SG2. The robot receiver expects **16 future waypoints** at offsets of **50, 100, …, 800 ms**. Each waypoint contains **16 named absolute joint positions in radians**, seven joints and one gripper per arm. Columns are matched by name. The training model can use a different layout, representation, or rate. Record its actual conventions so we can determine the conversion. [Robot message contract](../deploy/sg2/README.md#5090-wire-interface)
 
+The November 19 handoff supplies items 1–5 for all four PNP variants and provides measured loader targets. The remaining items are the selected weights, evaluation settings, a model-generated reference prediction, and confirmation of the hardware joint and gripper calibration. [Use the November 19 contract on the 5090](policy.md)
+
 ## While the run is training
 
 | Send | Details needed on the 5090 |

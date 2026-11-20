@@ -1,6 +1,6 @@
 # Set up the 5090 and an FFW-SG2 AI Worker from a fresh checkout
 
-**First-session goal:** from a terminal on the 5090, see a ready SG2 companion, pause it in preview, and see it resume. This exercises communication in both directions without commanding an actuator or loading a model. The trained SG2 policy and its 5090 adapter are a later step.
+**First-session goal:** from a terminal on the 5090, see a ready SG2 companion, pause it in preview, and see it resume. This exercises communication in both directions without commanding an actuator or loading a model. The [5090 SG2 policy guide](policy.md) covers Zenoh camera capture, loading a selected checkpoint, and sending a model-generated preview chunk after this first session.
 
 | Where you are | What belongs there |
 | --- | --- |

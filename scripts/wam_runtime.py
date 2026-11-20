@@ -2,6 +2,7 @@
 from pathlib import Path
 import time
 
+from bg2_inference import JOINT_NAMES
 from policy_runtime import NativePolicy
 from wam_checkpoint import validate_checkpoint, validate_experiment, file_hash
 from bg2_wam import build_batch, decode_actions, decoded_rgb, exported_formatter, restore_wam_config
@@ -9,6 +10,8 @@ from bg2_wam import build_batch, decode_actions, decoded_rgb, exported_formatter
 
 class NativeWAM(NativePolicy):
     mode = "wam"
+    joint_names = JOINT_NAMES
+    dataset_name = "bg2_room"
 
     def __init__(self, checkpoint, tokenizer, vae, adapter_dir, experiment_contract, *, step=20000):
         self.publication = validate_checkpoint(checkpoint, step=step)
@@ -32,7 +35,10 @@ class NativeWAM(NativePolicy):
             "action_start_frame_offset": 0,
             "action_postprocessing": "Inverse training affine only; raw predictions have no clipping or gripper floor."}
 
-    def predict(self, observation, *, seed=0, steps=4, guidance=3., shift=5., guidance_interval=None):
+    def decode(self, normalized, observation):
+        return decode_actions(normalized, observation, self.contract, joint_names=self.joint_names)
+
+    def predict(self, observation, *, seed=0, steps=4, guidance=3., shift=5., guidance_interval=None, decode_video=True):
         import numpy as np
         import torch
         if steps < 1 or not all(np.isfinite(v) for v in (guidance, shift)) or shift <= 0:
@@ -41,7 +47,8 @@ class NativeWAM(NativePolicy):
                 not np.isfinite(guidance_interval).all() or guidance_interval[0] > guidance_interval[1]):
             raise ValueError("Invalid guidance interval")
         started = time.monotonic()
-        batch, prompt = build_batch(observation, self.contract, self.experiment, self.formatter, self.tokenizer)
+        batch, prompt = build_batch(observation, self.contract, self.experiment, self.formatter, self.tokenizer,
+                                    joint_names=self.joint_names, dataset_name=self.dataset_name)
         preprocessing = time.monotonic() - started
         torch.cuda.reset_peak_memory_stats()
         tick = time.monotonic()
@@ -53,17 +60,20 @@ class NativeWAM(NativePolicy):
         if len(generated.get("action", [])) != 1 or len(generated.get("vision", [])) != 1:
             raise RuntimeError("Expected one jointly generated WAM action/video sequence")
         normalized = generated["action"][0].detach().float().cpu().numpy()
-        positions = decode_actions(normalized, observation, self.contract)
+        positions = self.decode(normalized, observation)
         latent = generated["vision"][0]
         if not torch.isfinite(latent).all():
             raise RuntimeError("Nonfinite imagined-video latent")
-        tick = time.monotonic()
-        with torch.inference_mode():
-            frames = decoded_rgb(self.model.decode(latent))
-        torch.cuda.synchronize()
-        decoding = time.monotonic() - tick
-        return {"mode": "wam", "positions": positions, "normalized": normalized,
-                "vision": [latent.detach().float().cpu().numpy()], "imagined_video": frames,
+        video = {}
+        decoding = 0.
+        if decode_video:
+            tick = time.monotonic()
+            with torch.inference_mode():
+                frames = decoded_rgb(self.model.decode(latent))
+            torch.cuda.synchronize()
+            decoding = time.monotonic() - tick
+            video = {"vision": [latent.detach().float().cpu().numpy()], "imagined_video": frames}
+        return {"mode": "wam", "positions": positions, "normalized": normalized, **video,
                 "prompt": prompt, "runtime_metadata": self.runtime_metadata,
                 "timings": {"loading_seconds": self.loading_seconds, "preprocessing_seconds": preprocessing,
                     "inference_seconds": generation, "video_decoding_seconds": decoding,

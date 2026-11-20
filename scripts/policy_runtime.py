@@ -21,6 +21,14 @@ def relocate_model_config(config, tokenizer, vae):
 
 class NativePolicy:
     def __init__(self, checkpoint, tokenizer, vae, adapter_dir, *, model_config_transform=None):
+        from bg2_inference import verify_adapter
+        self.checkpoint = Path(checkpoint)
+        self.contract = json.loads((self.checkpoint / "input_contract.json").read_text())
+        self.provenance = verify_adapter(Path(adapter_dir), self.contract)
+        self.load_model(self.checkpoint / "config.yaml", self.checkpoint / "model", tokenizer, vae,
+                        self.provenance["model_target"], model_config_transform)
+
+    def load_model(self, config_path, model_dir, tokenizer, vae, expected_target, model_config_transform):
         from cosmos_framework.inference.common.init import init_script
         init_script()
         import torch
@@ -29,23 +37,18 @@ class NativePolicy:
         from cosmos_framework.inference.common.config import deserialize_config_dict
         from cosmos_framework.inference.model import Cosmos3OmniConfig, Cosmos3OmniModel
         from cosmos_framework.utils.lazy_config import instantiate
-        from bg2_inference import verify_adapter
-
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA must be available in the inference container")
         start = time.monotonic()
-        self.checkpoint = Path(checkpoint)
-        self.contract = json.loads((self.checkpoint / "input_contract.json").read_text())
-        self.provenance = verify_adapter(Path(adapter_dir), self.contract)
-        model = relocate_model_config(deserialize_config_dict(self.checkpoint / "config.yaml"), tokenizer, vae)
+        model = relocate_model_config(deserialize_config_dict(config_path), tokenizer, vae)
         if model_config_transform is not None:
             model = model_config_transform(model)
         self.target = model["_target_"]
-        if self.target != self.provenance["model_target"] or model["config"].get("action_global_asinh") or model["config"].get("action_metric_gripper"):
-            raise ValueError("Checkpoint differs from the verified BG2 action contract")
+        if self.target != expected_target or model["config"].get("action_global_asinh") or model["config"].get("action_metric_gripper"):
+            raise ValueError("Checkpoint differs from the verified action contract")
         self.tokenizer = instantiate(model["config"]["vlm_config"]["tokenizer"])
         self.wrapper = Cosmos3OmniModel.from_pretrained_dcp(
-            self.checkpoint / "model", config=Cosmos3OmniConfig(model=model),
+            model_dir, config=Cosmos3OmniConfig(model=model),
             parallelism_config=ParallelismConfig(data_parallel_shard_degree=1, data_parallel_replicate_degree=1,
                                                 context_parallel_shard_degree=1, cfg_parallel_shard_degree=1,
                                                 enable_inference_mode=True),

@@ -9,7 +9,7 @@ import time
 import uuid
 
 from PIL import Image
-from .core import JointFeedback, require, stamp_ns
+from .core import JointFeedback, SG2, require, stamp_ns
 from .chunks import EXECUTION_CONTRACT, STATUS_SCHEMA
 from .observations import Observations
 from .rpc import identifier, InferenceBusy, InferenceNotSubmitted
@@ -17,12 +17,13 @@ from .recording import RecordingError
 
 
 class StatusCache:
-    def __init__(self):
+    def __init__(self, schema=STATUS_SCHEMA):
+        self.schema = schema
         self.lock = threading.Lock()
         self.value, self.received_ns = None, 0
 
     def update(self, value, received_ns):
-        require(isinstance(value, dict) and value.get('schema') == STATUS_SCHEMA and
+        require(isinstance(value, dict) and value.get('schema') == self.schema and
                 value.get('execution_contract') == EXECUTION_CONTRACT, 'Synchronous FFW status required')
         identifier(value.get('epoch'))
         require(value.get('phase') in {'initializing','settling','ready','running','holding','paused','fault','stopped'}, 'Invalid FFW phase')
@@ -213,7 +214,8 @@ class GatewayTransport:
     def control(self,epoch,command):
         require(command in {'pause','resume','stop'}, 'Unsupported control command')
         if self.control_publisher is not None:
-            self.control_publisher.publish(data=json.dumps({'schema':'cosmos_bg2_control_v1','epoch':epoch,'command':command}))
+            schema = 'cosmos_sg2_control_v1' if self.profile.get('robot') == SG2 else 'cosmos_bg2_control_v1'
+            self.control_publisher.publish(data=json.dumps({'schema':schema,'epoch':epoch,'command':command}))
 
     def stop(self,epoch):
         self.control(epoch,'stop')

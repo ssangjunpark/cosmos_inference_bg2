@@ -43,10 +43,13 @@ def exported_formatter(checkpoint):
     return module
 
 
-def prepare_tensors(observation, contract, experiment, formatter):
+def prepare_tensors(observation, contract, experiment, formatter, *, joint_names=JOINT_NAMES):
     import torch
-    if experiment["training_mode"] != "wam" or experiment["action"]["names"] != JOINT_NAMES:
-        raise ValueError("Expected the verified BG2 WAM experiment")
+    if experiment["training_mode"] != "wam" or experiment["action"]["names"] != joint_names or contract["normalization"]["joint_names"] != joint_names:
+        raise ValueError("WAM experiment and normalization joint names must match")
+    dim = len(joint_names)
+    if np.shape(observation["joint_position"]) != (dim,):
+        raise ValueError("Wrong number of observed WAM joints")
     stats = contract["normalization"]["joint_position"]
     lo, hi = np.asarray(stats["q01"]), np.asarray(stats["q99"])
     normalized = (observation["joint_position"].astype(np.float64) - (hi + lo) / 2) / np.maximum((hi - lo) / 2, 1e-6)
@@ -59,19 +62,19 @@ def prepare_tensors(observation, contract, experiment, formatter):
         video[:, 0] = current
         views.append(video)
     action = torch.zeros((17, 64), dtype=torch.float32)
-    action[0, :8] = torch.from_numpy(normalized).float()
-    raw = torch.zeros((17, 8), dtype=torch.float32)
+    action[0, :dim] = torch.from_numpy(normalized).float()
+    raw = torch.zeros((17, dim), dtype=torch.float32)
     raw[0] = torch.from_numpy(observation["joint_position"].copy())
     return {"video": formatter.compose_views(*views), "action": action, "action_raw": raw,
-            "raw_action_dim": torch.tensor(8), "domain_id": torch.tensor(experiment["action"]["domain_id"])}
+            "raw_action_dim": torch.tensor(dim), "domain_id": torch.tensor(experiment["action"]["domain_id"])}
 
 
-def build_batch(observation, contract, experiment, formatter, tokenizer):
+def build_batch(observation, contract, experiment, formatter, tokenizer, *, joint_names=JOINT_NAMES, dataset_name='bg2_room'):
     import torch
     from cosmos_framework.data.generator.action.utils.action_processing import ActionProcessingRecord
     from cosmos_framework.data.generator.joint_dataloader import custom_collate_fn
     from cosmos_framework.data.generator.sequence_packing import SequencePlan
-    sample = prepare_tensors(observation, contract, experiment, formatter)
+    sample = prepare_tensors(observation, contract, experiment, formatter, joint_names=joint_names)
     prompt = formatter.build_policy_prompt(observation["instruction"])
     if json.loads(prompt).get("mode") == "policy":
         raise ValueError("Checkpoint formatter produced a policy-only prompt")
@@ -83,9 +86,9 @@ def build_batch(observation, contract, experiment, formatter, tokenizer):
                    "image_size": torch.tensor([640., 512., 640., 512.]),
                    "sequence_plan": SequencePlan(has_text=True, has_vision=True, has_action=True,
                        condition_frame_indexes_vision=[0], condition_frame_indexes_action=[0], action_start_frame_offset=0),
-                   "action_processing_record": ActionProcessingRecord(raw_action_dim=8, action_normalizer=None)})
+                   "action_processing_record": ActionProcessingRecord(raw_action_dim=len(joint_names), action_normalizer=None)})
     batch = custom_collate_fn([sample])
-    batch["dataset_name"] = ["bg2_room"]
+    batch["dataset_name"] = [dataset_name]
     for key in ("text_token_ids", "video", "action", "action_raw"):
         batch[key] = [[value] for value in batch[key]]
     for key in ("image_size", "conditioning_fps"):
@@ -93,10 +96,10 @@ def build_batch(observation, contract, experiment, formatter, tokenizer):
     return batch, prompt
 
 
-def decode_actions(normalized, observation, contract):
+def decode_actions(normalized, observation, contract, *, joint_names=JOINT_NAMES):
     """Invert training normalization; preserve every raw prediction, including negatives."""
-    if normalized.shape != (17, 8) or not np.isfinite(normalized).all():
-        raise ValueError("Expected finite WAM actions shaped (17, 8)")
+    if normalized.shape != (17, len(joint_names)) or not np.isfinite(normalized).all():
+        raise ValueError(f"Expected finite WAM actions shaped (17, {len(joint_names)})")
     stats = contract["normalization"]["joint_position"]
     lo, hi = np.asarray(stats["q01"]), np.asarray(stats["q99"])
     physical = normalized.astype(np.float64) * np.maximum((hi - lo) / 2, 1e-6) + (hi + lo) / 2

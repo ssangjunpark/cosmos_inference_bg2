@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from bg2_inference import FORMAT, JOINT_NAMES
-from .core import BridgeError, require, validate_profile
+from .core import BridgeError, SG2, require, validate_profile
 
 # Fixed model input sizes; the training crop is supplied by each camera profile.
 # The legacy crops remain here for consumers of the reference camera contract.
@@ -37,7 +37,9 @@ def decode_view(payload, key, spec):
 
 
 class Observations:
-    def __init__(self, profile, max_samples=64):
+    def __init__(self, profile, max_samples=64, *, joint_names=JOINT_NAMES, observation_format=FORMAT):
+        self.joint_names = joint_names
+        self.format = observation_format
         self.profile = profile
         self.lock = RLock()
         self.joints = deque(maxlen=max_samples)
@@ -70,7 +72,7 @@ class Observations:
 
     def snapshot(self, instruction, now_ns, *, receipt_now_ns=None, not_before_ns=0, include_raw=False):
         receipt_now_ns = now_ns if receipt_now_ns is None else receipt_now_ns
-        validate_profile(self.profile, live=True)
+        validate_profile(self.profile, live=True, companion=self.profile.get("robot") == SG2)
         require(isinstance(instruction, str) and instruction.strip(), "Instruction is empty")
         with self.lock:
             require(self.error is None, f"Observation callback failed: {self.error}")
@@ -93,7 +95,7 @@ class Observations:
         require(all(0 <= receipt_now_ns - f[1] <= 100_000_000 and -25_000_000 <= now_ns - f[0] <= 100_000_000
                     for f in frames.values()), "Stale camera or unsynchronized robot clock")
         result = {key: decode_view(frame[2], key, self.profile["cameras"][key]) for key, frame in frames.items()}
-        result.update(joint_position=np.asarray([joint.positions[n] for n in JOINT_NAMES], dtype=np.float32),
+        result.update(joint_position=np.asarray([joint.positions[n] for n in self.joint_names], dtype=np.float32),
                       source_time_ns=np.asarray(joint.source_ns, dtype=np.int64), instruction=np.asarray(instruction),
-                      joint_names=np.asarray(JOINT_NAMES), format=np.asarray(FORMAT))
+                      joint_names=np.asarray(self.joint_names), format=np.asarray(self.format))
         return (result, frames) if include_raw else result

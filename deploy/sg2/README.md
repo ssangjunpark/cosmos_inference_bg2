@@ -73,8 +73,7 @@ the installation, and select it with `--profile` and `--mode execute`.
 ## 5090 wire interface
 
 All three bridge topics carry JSON in `std_msgs/msg/String`. These are robot
-command coordinates in radians. A future 5090 adapter can convert the trained
-model's outputs into this format.
+command coordinates in radians. The 5090 SG2 policy adapter converts the selected model's dataset coordinates to these commands using a site-supplied joint calibration.
 
 - Status uses `cosmos_sg2_status_v3`. Wait for `needs_chunk` and use the reported
   `epoch`, `cycle`, and `ready_since_ns`. Check `mode` to distinguish preview

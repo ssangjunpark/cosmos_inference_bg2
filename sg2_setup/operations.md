@@ -116,7 +116,7 @@ cp -n config/profile.reference.json config/profile.site.json
 
 For an intentional hardware session, run the validated invocation **without `--check`**. From a second terminal verify `mode="execute"`, `controllers_ready=true`, a current epoch, and a ready or holding phase. Current-pose startup captures measured positions. The supplied initial-position YAML provides the arm groups and settling tolerances.
 
-**Future 5090 model adapter.** The repository implements the **robot receiver**. The 5090 sender for the bimanual training checkpoint is pending the training contract. Request the run configuration, tensor layouts, preprocessing and reference prediction using the [training handoff checklist](training_handoff.md). It must map the learned action representation to absolute radians, supply all 16 names and matching columns, and send 16 future points at 50 ms intervals. Use the robot-stamped fresh observation time after `ready_since_ns` and the latest `cycle` and `epoch`. The previous chunk completes when the robot reports its `last_completed_request_id` and `needs_chunk=true`. The BG2 inference commands in the root README target a different profile and wire schema. The complete message fields are in the [SG2 protocol](../deploy/sg2/README.md#5090-wire-interface).
+**5090 model sender.** Use the [SG2 policy guide](policy.md) to select a PNP1 or PNP2 checkpoint, confirm its dataset-to-controller calibration, and run a synchronized preview. The sender fills a 16-joint chunk at 50 ms intervals using the current session and hold timestamp, then waits for the matching completion acknowledgement. PNP1 holds the measured left arm. PNP2 predicts both arms. [SG2 protocol](../deploy/sg2/README.md#5090-wire-interface)
 
 ## Stop, restart, update, or roll back
 

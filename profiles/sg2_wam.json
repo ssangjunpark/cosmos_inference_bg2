@@ -1,0 +1,206 @@
+{
+  "pnp1_abnormal": {
+    "joint_names": [
+      "arm_r_joint1",
+      "arm_r_joint2",
+      "arm_r_joint3",
+      "arm_r_joint4",
+      "arm_r_joint5",
+      "arm_r_joint6",
+      "arm_r_joint7",
+      "gripper_r_joint1"
+    ],
+    "instruction": "Pick up the red spool and place it into the empty metal basket.",
+    "q01": [
+      -0.5884338617324829,
+      -0.4016572833061218,
+      -0.5651844143867493,
+      -1.842710018157959,
+      -0.4235956072807312,
+      -0.41567283868789673,
+      0.11401987820863724,
+      0.0
+    ],
+    "q99": [
+      0.3256043791770935,
+      1.1984225238848012e-05,
+      0.2914251983165741,
+      -0.4507290720939636,
+      0.34754371643066406,
+      1.0741609334945679,
+      1.3636839389801025,
+      0.4632622003555298
+    ],
+    "source_sha256": {
+      "config.yaml": "abb1a395bb6e706b9cfc5bd2b4ae628e3c844defbf57a1df4ba4556fd78ce0a4",
+      "input_contract.json": "8ba40955af2202e4aaed91e0e0e9d70d516cb10a7771318c893eabdf97cead17",
+      "vision_contract.py": "6dd7fbe6c068743bb1c7a479adb19e8036e7810f79116a69f2083f85d6b669dc"
+    },
+    "run_name": "cosmos3_edge__pnp1_abnormal__wam20k"
+  },
+  "pnp1_normal": {
+    "joint_names": [
+      "arm_r_joint1",
+      "arm_r_joint2",
+      "arm_r_joint3",
+      "arm_r_joint4",
+      "arm_r_joint5",
+      "arm_r_joint6",
+      "arm_r_joint7",
+      "gripper_r_joint1"
+    ],
+    "instruction": "Pick up the red spool and place it into the empty metal basket.",
+    "q01": [
+      -0.45815810561180115,
+      -0.32801780104637146,
+      -0.6119025349617004,
+      -1.9587591886520386,
+      -0.48100724816322327,
+      -0.4428170919418335,
+      -0.09169726073741913,
+      0.0
+    ],
+    "q99": [
+      0.3276655673980713,
+      1.1984225238848012e-05,
+      0.34040719270706177,
+      -0.6371355056762695,
+      0.3752560615539551,
+      1.1880803108215332,
+      1.3591021299362183,
+      0.5062136650085449
+    ],
+    "source_sha256": {
+      "config.yaml": "b1ef9668cce386851b8326d5e7c806a2afdd10e88d177b739f8c75201210037b",
+      "input_contract.json": "678fd9faa2b17d849c9cca822d04dee36079542bb002208701871a0538e1f8ef",
+      "vision_contract.py": "6dd7fbe6c068743bb1c7a479adb19e8036e7810f79116a69f2083f85d6b669dc"
+    },
+    "run_name": "cosmos3_edge__pnp1_normal__wam20k"
+  },
+  "pnp2_abnormal": {
+    "joint_names": [
+      "arm_l_joint1",
+      "arm_l_joint2",
+      "arm_l_joint3",
+      "arm_l_joint4",
+      "arm_l_joint5",
+      "arm_l_joint6",
+      "arm_l_joint7",
+      "gripper_l_joint1",
+      "arm_r_joint1",
+      "arm_r_joint2",
+      "arm_r_joint3",
+      "arm_r_joint4",
+      "arm_r_joint5",
+      "arm_r_joint6",
+      "arm_r_joint7",
+      "gripper_r_joint1"
+    ],
+    "instruction": "Move the wooden tray to the right, then place the red spool into it.",
+    "q01": [
+      -0.37039703130722046,
+      0.12032090127468109,
+      -0.6222062110900879,
+      -1.7551714181900024,
+      -0.026347799226641655,
+      0.030667630955576897,
+      -0.6090190410614014,
+      0.06289321184158325,
+      -0.42673152685165405,
+      -0.32392534613609314,
+      -0.7149916887283325,
+      -2.002459764480591,
+      -0.28807738423347473,
+      -0.4656413197517395,
+      -0.009269638918340206,
+      0.0
+    ],
+    "q99": [
+      -0.04698724299669266,
+      0.37594351172447205,
+      0.4717738926410675,
+      -0.925596296787262,
+      0.6994891166687012,
+      0.63323974609375,
+      -0.17710791528224945,
+      1.1060001850128174,
+      0.2606600522994995,
+      1.1984225238848012e-05,
+      0.28264692425727844,
+      -0.7363706827163696,
+      0.4266471564769745,
+      1.015876054763794,
+      1.3529689311981201,
+      0.5062136650085449
+    ],
+    "source_sha256": {
+      "config.yaml": "f1a2501d4de0dee37a4de3f4075fdf6b11713256f9715c87801818a74adcd4a1",
+      "input_contract.json": "280474fff3965ff91a0eea5f509eb53088c9f6f97e5bca6c70d7364414c37ed1",
+      "vision_contract.py": "6dd7fbe6c068743bb1c7a479adb19e8036e7810f79116a69f2083f85d6b669dc"
+    },
+    "run_name": "cosmos3_edge__pnp2_abnormal__wam20k"
+  },
+  "pnp2_normal": {
+    "joint_names": [
+      "arm_l_joint1",
+      "arm_l_joint2",
+      "arm_l_joint3",
+      "arm_l_joint4",
+      "arm_l_joint5",
+      "arm_l_joint6",
+      "arm_l_joint7",
+      "gripper_l_joint1",
+      "arm_r_joint1",
+      "arm_r_joint2",
+      "arm_r_joint3",
+      "arm_r_joint4",
+      "arm_r_joint5",
+      "arm_r_joint6",
+      "arm_r_joint7",
+      "gripper_r_joint1"
+    ],
+    "instruction": "Pick up the red spool and place it into the wooden tray on the right.",
+    "q01": [
+      -0.3232744634151459,
+      0.18672093749046326,
+      0.0902637392282486,
+      -1.6474953889846802,
+      0.0028838838916271925,
+      0.29703477025032043,
+      -0.8179571628570557,
+      0.28378644585609436,
+      -0.3780553340911865,
+      -0.3536386489868164,
+      -0.6343763470649719,
+      -1.8430367708206177,
+      -0.31610456109046936,
+      -0.40827715396881104,
+      0.19891932606697083,
+      0.0
+    ],
+    "q99": [
+      -0.1633804589509964,
+      0.41111308336257935,
+      0.5618124008178711,
+      -1.252183198928833,
+      0.37515658140182495,
+      0.7179030179977417,
+      -0.4700161814689636,
+      0.4724660813808441,
+      0.3192718029022217,
+      1.1984225238848012e-05,
+      0.2993803322315216,
+      -0.6304541230201721,
+      0.4322369694709778,
+      0.5627796649932861,
+      1.0401272773742676,
+      0.4586602449417114
+    ],
+    "source_sha256": {
+      "config.yaml": "2a9bf1347875088ea3e542476d620cc9e18ca6483684e98036aca66f2764ac23",
+      "input_contract.json": "8161402c0a851bb8ca3771f1e2d8327d36e9c1bc0c8d09598892a68e8631508c",
+      "vision_contract.py": "6dd7fbe6c068743bb1c7a479adb19e8036e7810f79116a69f2083f85d6b669dc"
+    },
+    "run_name": "cosmos3_edge__pnp2_normal__wam20k"
+  }
+}
